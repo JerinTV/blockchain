@@ -1,31 +1,210 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// ===============================
+// GENERATOR & DATABASE
+// ===============================
 
 generator client {
   provider = "prisma-client-js"
-
 }
 
 datasource db {
   provider = "postgresql"
-  url = env("DATABASE_URL")
+  url      = env("DATABASE_URL")
 }
 
+// ===============================
+// ENUMS
+// ===============================
+
+enum Role {
+  ADMIN
+  MANUFACTURER
+  RETAILER
+  USER
+}
+
+enum ProductStatus {
+  CREATED
+  SHIPPED
+  SOLD
+}
+
+// ===============================
+// USER (Authentication)
+// ===============================
+
 model User {
-  id        Int     @id @default(autoincrement())
-  email     String  @unique
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
   password  String
-  role      String
+  role      Role
+
+  manufacturer Manufacturer?
+  retailer     Retailer?
+
   createdAt DateTime @default(now())
 }
 
-model ProductSecret {
+// ===============================
+// MANUFACTURER
+// ===============================
+
+model Manufacturer {
+  id      Int  @id @default(autoincrement())
+  userId  Int  @unique
+  name    String
+
+  user    User   @relation(fields: [userId], references: [id])
+  batches Batch[]
+
+  createdAt DateTime @default(now())
+}
+
+// ===============================
+// RETAILER
+// ===============================
+
+model Retailer {
+  id      Int @id @default(autoincrement())
+  userId  Int @unique
+  name    String
+
+  user    User @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+// ===============================
+// BATCH  (Summary Level)
+// ===============================
+
+model Batch {
+  id              Int    @id @default(autoincrement())
+  batchCode       String @unique
+  boxCode         String?
+
+  manufacturerId  Int
+  manufacturer    Manufacturer @relation(fields: [manufacturerId], references: [id])
+
+  totalBoxes      Int
+  totalProducts   Int
+  registered      Boolean @default(true)
+  verified        Boolean @default(false)
+  shipped         Boolean @default(false)
+
+  boxes    Box[]
+  products Product[]
+
+  createdAt DateTime @default(now())
+}
+
+// ===============================
+// BOX  (Summary Level)
+// ===============================
+
+model Box {
+  id            Int    @id @default(autoincrement())
+  boxCode       String @unique
+
+  batchId       Int
+  batch         Batch  @relation(fields: [batchId], references: [id])
+
+  totalProducts Int
+  manufacturerId String?
+  manufactureLocation String?
+  retailerId    String?
+  retailerLocation String?
+  registered    Boolean @default(true)
+  verified      Boolean @default(false)
+  shipped       Boolean @default(false)
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+}
+
+// ===============================
+// PRODUCT (Full Details)
+// ===============================
+
+model Product {
   id        Int    @id @default(autoincrement())
-  productId String @unique
+  productCode String @unique
+
+  batchId   Int
+  batch     Batch @relation(fields: [batchId], references: [id])
+
+  boxId     Int
+  box       Box @relation(fields: [boxId], references: [id])
+
+  // Product Information
+  name      String
+  brand     String
+  category  String
+  modelNumber String?
+  serialNumber String?
+  warrantyPeriod String?
+  color String?
+  price Int @default(0)
+  image String?
+  retailerId String?
+  retailerLocation String?
+
+  mfgDate   DateTime?
+  expDate   DateTime?
+
+  // Blockchain + QR
+  qrHash          String?   @unique
+  blockchainHash  String?
+
+  status ProductStatus @default(CREATED)
+  registered Boolean @default(true)
+  verified   Boolean @default(false)
+  shipped    Boolean @default(false)
+  sold       Boolean @default(false)
+
+  createdAt DateTime @default(now())
+}
+
+// ===============================
+// PRODUCT SECRET (NFC challenge)
+// ===============================
+
+model ProductSecret {
+  id        Int      @id @default(autoincrement())
+  productId String   @unique
   secret    String
   createdAt DateTime @default(now())
 }
 
+model BoxSecret {
+  id        Int      @id @default(autoincrement())
+  boxId     String   @unique
+  secret    String
+  createdAt DateTime @default(now())
+}
+
+model PreparedProduct {
+  id               Int      @id @default(autoincrement())
+  productId        String   @unique
+  batchId          String
+  boxId            String
+  serialNumber     String
+  name             String
+  category         String
+  manufacturer     String
+  manufacturerDate String
+  manufacturePlace String
+  modelNumber      String
+  warrantyPeriod   String
+  color            String
+  specs            String
+  price            Int
+  image            String
+  retailerName     String   @default("")
+  retailerLocation String   @default("")
+  registered       Boolean  @default(true)
+  verified         Boolean  @default(false)
+  shipped          Boolean  @default(false)
+  sold             Boolean  @default(false)
+  createdAt        DateTime @default(now())
+}

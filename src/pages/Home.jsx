@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from "react";
 import "../index.css";
 import { useNavigate } from "react-router-dom";
+import {
+  User,
+  Mail,
+  MessageSquare,
+  Phone,
+  MapPin
+} from "lucide-react";
 
 const Home = () => {
 
@@ -13,7 +20,6 @@ const Home = () => {
   // STATES
   // -------------------------------
   const [activeSection, setActiveSection] = useState("home");
-  const [showMore, setShowMore] = useState(false);
 
   // -------------------------------
   // NAVBAR SCROLL SPY
@@ -48,11 +54,8 @@ const Home = () => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // -------------------------------
-  // ABOUT TEXT (NORMAL TEXT)
-  // -------------------------------
   const aboutText =
-    "TrustChain ensures product security using blockchain-powered verification. Our platform guarantees authenticity, prevents duplication, and enables traceability from manufacturer to end user.";
+    "TrustChain protects your products with secure blockchain records, quick verification, and complete visibility from manufacturer to customer. It gives your team one reliable system to prevent counterfeits, build customer trust, and make better decisions.";
 
   // -------------------------------
   // FEATURE CARD SCROLL ANIMATION
@@ -61,26 +64,45 @@ const Home = () => {
     const observer = new IntersectionObserver(
       entries => {
         entries.forEach(entry => {
-          if (entry.isIntersecting)
-            entry.target.classList.add("show");
-          else
-            entry.target.classList.remove("show");
+          if (entry.target.classList.contains("feature-card")) {
+            if (entry.isIntersecting) entry.target.classList.add("show");
+            else entry.target.classList.remove("show");
+            return;
+          }
+
+          if (entry.target.classList.contains("contact-v2-panel")) {
+            // Reveal once and keep visible to avoid "contact not loading" issues.
+            if (entry.isIntersecting) {
+              entry.target.classList.add("in-view");
+              observer.unobserve(entry.target);
+            }
+          }
         });
       },
-      { threshold: 0.25 }
+      { threshold: 0.1, rootMargin: "0px 0px -8% 0px" }
     );
 
-    document.querySelectorAll(".feature-card")
-      .forEach(card => observer.observe(card));
+    const observedElements = document.querySelectorAll(".feature-card, .contact-v2-panel");
+    observedElements.forEach(card => observer.observe(card));
 
-    return () => observer.disconnect();
+    // Fallback: ensure contact panels are visible even if intersection events fail.
+    const contactFallbackTimer = window.setTimeout(() => {
+      document.querySelectorAll(".contact-v2-panel").forEach(panel => {
+        panel.classList.add("in-view");
+      });
+    }, 900);
+
+    return () => {
+      window.clearTimeout(contactFallbackTimer);
+      observer.disconnect();
+    };
   }, []);
 
   // ==================================================
   // JSX
   // ==================================================
   return (
-    <div>
+    <div className="home-page">
 
       {/* ================= NAVBAR ================= */}
       <nav className="navbar">
@@ -114,156 +136,308 @@ const Home = () => {
             <span className="line2">PRODUCT SECURITY</span>
           </h1>
 
-          <p className="motto">
-            Securing your products with trust, transparency, and innovation.
-          </p>
-
-          <div className="hero-buttons">
-            <button
-              className="btn-primary"
-              onClick={() => navigate("/roles")}
-            >
-              Get Started
-            </button>
-
-            <button
-              className="btn-outline"
-              onClick={() => setShowMore(!showMore)}
-            >
-              {showMore ? "Show Less" : "See More"}
-            </button>
+          <div className="motto-row">
+            <p className="motto">
+              Securing your products with
+            </p>
+            <div className="value-strip">
+              <span className="value-chip trust">
+                <img src="/bc1.png" alt="Trust logo" className="value-logo" />
+                Trust
+              </span>
+              <span className="value-chip transparency">
+                <img src="/bc1.png" alt="Transparency logo" className="value-logo" />
+                Transparency
+              </span>
+              <span className="value-chip innovation">
+                <img src="/bc1.png" alt="Innovation logo" className="value-logo" />
+                Innovation
+              </span>
+            </div>
           </div>
 
-          {showMore && (
-            <div className="extra-paragraph">
-              <p>
-                TrustChain is a blockchain-powered product authentication platform
-                that verifies every product through encrypted QR codes and
-                tamper-proof blockchain records.
-              </p>
+          <section className="home-premium-cta">
+            <div className="home-premium-cta-shell">
+              <p>Ready to secure your supply chain?</p>
+              <button
+                className="btn-primary"
+                onClick={() => navigate("/roles")}
+              >
+                Get Started
+              </button>
             </div>
-          )}
+          </section>
+
         </div>
       </section>
 
       {/* ================= ABOUT ================= */}
-      <section id="about" className="about-section">
-        <div className="about-box">
+      <section id="about" className="about-premium-section">
+        <div className="about-premium-head">
+          <p className="about-premium-kicker">About TrustChain</p>
+          <h2>Secure, Simple Product Protection</h2>
+          <p className="about-premium-desc">{aboutText}</p>
+        </div>
 
-          <div className="about-content">
-            <h2>ABOUT OUR SYSTEM</h2>
-            <p className="about-text">{aboutText}</p>
+        <div className="about-premium-grid">
+          <article className="about-premium-card about-word-chip trust">Secure Records</article>
+          <article className="about-premium-card about-word-chip transparency">Instant Verify</article>
+          <article className="about-premium-card about-word-chip innovation">Full Tracking</article>
+          <article className="about-premium-card about-word-chip assurance">Counterfeit Free</article>
+        </div>
+      </section>
+
+      <section className="home-flow-wrap" aria-label="Product flow from manufacturer to customer">
+        <div className="home-flow-track">
+          <span className="home-flow-line"></span>
+          <span className="home-flow-progress"></span>
+          <span className="home-flow-runner"></span>
+
+          <div className="home-flow-node node-1">
+            <img src="/man.png" alt="Manufacturer" />
+            <span className="home-flow-tick">✓</span>
           </div>
-
-          <img
-            src="/blockchain.png"
-            alt="Blockchain"
-            className="about-img"
-          />
+          <div className="home-flow-node node-2">
+            <img src="/del.png" alt="Delivery" />
+            <span className="home-flow-tick">✓</span>
+          </div>
+          <div className="home-flow-node node-3">
+            <img src="/ret.png" alt="Retailer" />
+            <span className="home-flow-tick">✓</span>
+          </div>
+          <div className="home-flow-node node-4">
+            <img src="/cus.png" alt="Customer" />
+            <span className="home-flow-tick">✓</span>
+          </div>
         </div>
       </section>
 
       {/* ================= FEATURES ================= */}
       <section id="features" className="section features-section">
+        <img
+          src="/pr1.png"
+          alt="Feature Left"
+          className="features-edge-art features-edge-left"
+          onError={(e) => {
+            e.currentTarget.onerror = null;
+            e.currentTarget.src = "/logo1.jpg";
+          }}
+        />
+        <img
+          src="/pr2.png"
+          alt="Feature Right"
+          className="features-edge-art features-edge-right"
+          onError={(e) => {
+            e.currentTarget.onerror = null;
+            e.currentTarget.src = "/logo2.jpg";
+          }}
+        />
 
-        <h2 className="fade-heading">
-          {"FEATURES".split("").map((letter, i) => (
-            <span key={i} style={{ animationDelay: `${i * 0.1}s` }}>
-              {letter}
-            </span>
-          ))}
-        </h2>
+        <div className="features-heading-wrap">
+          <p className="features-kicker">Platform Capabilities</p>
+          <h2 className="fade-heading">Premium Features</h2>
+          <p className="features-subtitle">
+            Built for enterprises that need speed, trust, and complete traceability.
+          </p>
+        </div>
 
-        <div className="features">
+        <div className="features-carousel">
+          <div className="features-track">
+            <article className="feature-card feature-card-uniform">
+              <div className="feature-top-row">
+                <img src="folder.png" className="feature-icon" alt="lock" />
+                <span className="feature-pill">Ledger Core</span>
+              </div>
+              <h3>Immutable Chain Records</h3>
+              <p>
+                Every lifecycle event is cryptographically secured and permanently auditable.
+              </p>
+              <div className="feature-meta-row">
+                <strong>99.99%</strong>
+                <span>Data Integrity</span>
+              </div>
+            </article>
 
-          <div className="feature-card slide-left">
-            <img src="folder.png" className="feature-icon" alt="lock" />
-            <h3>Immutable Records</h3>
-            <p>All transactions are permanently recorded and cannot be altered.</p>
+            <article className="feature-card feature-card-uniform">
+              <div className="feature-top-row">
+                <img src="qr-code.png" className="feature-icon" alt="verify" />
+                <span className="feature-pill">Consumer Trust</span>
+              </div>
+              <h3>Instant Product Verification</h3>
+              <p>
+                Scan and validate in seconds with secure QR identity and tamper checks.
+              </p>
+            </article>
+
+            <article className="feature-card feature-card-uniform">
+              <div className="feature-top-row">
+                <img src="track.png" className="feature-icon" alt="tracking" />
+                <span className="feature-pill">Live Visibility</span>
+              </div>
+              <h3>End-to-End Traceability</h3>
+              <p>
+                Track each unit from manufacturing, shipping, verification, and final sale.
+              </p>
+            </article>
+
+            <article className="feature-card feature-card-uniform">
+              <div className="feature-top-row">
+                <img src="fake.png" className="feature-icon" alt="security" />
+                <span className="feature-pill">Fraud Shield</span>
+              </div>
+              <h3>Anti-Counterfeit Defense</h3>
+              <p>
+                Eliminate fake products by matching secure chain history against real-time scans.
+              </p>
+              <div className="feature-risk-chip">Risk Monitoring Enabled</div>
+            </article>
+
+            <article className="feature-card feature-card-uniform">
+              <div className="feature-top-row">
+                <img src="folder.png" className="feature-icon" alt="lock" />
+                <span className="feature-pill">Ledger Core</span>
+              </div>
+              <h3>Immutable Chain Records</h3>
+              <p>
+                Every lifecycle event is cryptographically secured and permanently auditable.
+              </p>
+              <div className="feature-meta-row">
+                <strong>99.99%</strong>
+                <span>Data Integrity</span>
+              </div>
+            </article>
+
+            <article className="feature-card feature-card-uniform">
+              <div className="feature-top-row">
+                <img src="qr-code.png" className="feature-icon" alt="verify" />
+                <span className="feature-pill">Consumer Trust</span>
+              </div>
+              <h3>Instant Product Verification</h3>
+              <p>
+                Scan and validate in seconds with secure QR identity and tamper checks.
+              </p>
+            </article>
+
+            <article className="feature-card feature-card-uniform">
+              <div className="feature-top-row">
+                <img src="track.png" className="feature-icon" alt="tracking" />
+                <span className="feature-pill">Live Visibility</span>
+              </div>
+              <h3>End-to-End Traceability</h3>
+              <p>
+                Track each unit from manufacturing, shipping, verification, and final sale.
+              </p>
+            </article>
+
+            <article className="feature-card feature-card-uniform">
+              <div className="feature-top-row">
+                <img src="fake.png" className="feature-icon" alt="security" />
+                <span className="feature-pill">Fraud Shield</span>
+              </div>
+              <h3>Anti-Counterfeit Defense</h3>
+              <p>
+                Eliminate fake products by matching secure chain history against real-time scans.
+              </p>
+              <div className="feature-risk-chip">Risk Monitoring Enabled</div>
+            </article>
           </div>
-
-          <div className="feature-card slide-right">
-            <img src="qr-code.png" className="feature-icon" alt="verify" />
-            <h3>Trusted Verification</h3>
-            <p>Consumers instantly validate authenticity using QR scanning.</p>
-          </div>
-
-          <div className="feature-card slide-left">
-            <img src="track.png" className="feature-icon" alt="tracking" />
-            <h3>Transparent Supply Chain</h3>
-            <p>Track products clearly from manufacturing to delivery.</p>
-          </div>
-
-          <div className="feature-card slide-right">
-            <img src="fake.png" className="feature-icon" alt="security" />
-            <h3>Anti-Counterfeit Protection</h3>
-            <p>Eliminates fraudulent products using blockchain matching.</p>
-          </div>
-
         </div>
       </section>
 
-      {/* ================= CONTACT ================= */}
-      <section id="contact" className="contact-section">
-        <div className="contact-box">
+                {/* ================= CONTACT ================= */}
+      <section id="contact" className="contact-v2-section contact-v2-premium">
+        <div className="contact-v2-shell">
+          <div className="contact-v2-left contact-v2-panel contact-v2-from-left">
+            <p className="contact-v2-kicker">CONNECT WITH TRUSTCHAIN</p>
+            <h2>Let&apos;s Secure Your Product Journey</h2>
+            <p className="contact-v2-desc">
+              Talk to our team about onboarding, anti-counterfeit workflows, and enterprise traceability.
+              We help brands launch blockchain-backed verification fast.
+            </p>
 
-          <h2 className="contact-title">GET IN TOUCH</h2>
-          <p className="contact-subtitle">
-            Have questions about TrustChain or want to integrate blockchain
-            authentication into your product line? We’re here to help.
-          </p>
-
-          <div className="contact-grid">
-
-            {/* LEFT INFO */}
-            <div className="contact-info">
-
-              <div className="info-item">
-                <span className="info-label">Email</span>
-                <p>support@trustchain.com</p>
-              </div>
-
-              <div className="info-item">
-                <span className="info-label">Phone</span>
-                <p>+91 9876543210</p>
-              </div>
-
-              <div className="info-item">
-                <span className="info-label">Office</span>
-                <p>123 Blockchain Street<br />Tech City, India</p>
-              </div>
-
+            <div className="contact-v2-highlights">
+              <span>24x7 Support</span>
+              <span>Enterprise Onboarding</span>
+              <span>Audit Assistance</span>
             </div>
 
+            <div className="contact-v2-cards">
+              <div className="contact-v2-card">
+                <span><Mail size={15} /></span>
+                <div>
+                  <h4>Email</h4>
+                  <p>support@trustchain.com</p>
+                </div>
+              </div>
+              <div className="contact-v2-card">
+                <span><Phone size={15} /></span>
+                <div>
+                  <h4>Phone</h4>
+                  <p>+91 9876543210</p>
+                </div>
+              </div>
+              <div className="contact-v2-card">
+                <span><MapPin size={15} /></span>
+                <div>
+                  <h4>Office</h4>
+                  <p>123 Blockchain Street, Tech City</p>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* SOCIAL ICONS */}
-          <div className="contact-socials">
-            <a href="#" className="social-link">
-              <img src="/instagram.png" alt="Instagram" />
-            </a>
-
-            <a href="#" className="social-link">
-              <img src="/linkedin.png" alt="LinkedIn" />
-            </a>
-
-            <a href="#" className="social-link">
-              <img src="/social.png" alt="Social" />
-            </a>
+          <div className="contact-v2-right contact-v2-panel contact-v2-from-right">
+            <form className="contact-v2-form">
+              <div className="contact-v2-input">
+                <User size={16} />
+                <input type="text" placeholder="Your Name" required />
+              </div>
+              <div className="contact-v2-input">
+                <Mail size={16} />
+                <input type="email" placeholder="Work Email" required />
+              </div>
+              <div className="contact-v2-input contact-v2-textarea">
+                <MessageSquare size={16} />
+                <textarea placeholder="Tell us what you need..." rows="5" required />
+              </div>
+              <button type="submit">Send Message</button>
+              <div className="contact-v2-social-row">
+                <a href="https://instagram.com" target="_blank" rel="noreferrer" aria-label="Instagram">
+                  <img src="/instagram.png" alt="Instagram" />
+                </a>
+                <a href="https://wa.me/919876543210" target="_blank" rel="noreferrer" aria-label="WhatsApp">
+                  <img src="/social.png" alt="Social" />
+                </a>
+                <a href="https://linkedin.com" target="_blank" rel="noreferrer" aria-label="LinkedIn">
+                  <img src="/linkedin.png" alt="LinkedIn" />
+                </a>
+              </div>
+            </form>
           </div>
-
         </div>
       </section>
 
 
 
-      {/* ================= FOOTER ================= */}
+                  {/* ================= FOOTER ================= */}
       <footer className="footer">
-        <p>© 2025 TrustChain. All rights reserved.</p>
-      </footer>
+  <div className="footer-simple-wrap">
+    <div className="footer-simple-brand">
+      <img src="/bc1.png" alt="TrustChain" className="footer-simple-logo" />
+      <div>
+        <h3>TrustChain</h3>
+        <p>Blockchain Product Security Platform</p>
+      </div>
+    </div>
+
+    <p className="footer-simple-copy">© 2026 TrustChain. All rights reserved.</p>
+  </div>
+</footer>
 
     </div>
   );
 };
 
 export default Home;
+
+

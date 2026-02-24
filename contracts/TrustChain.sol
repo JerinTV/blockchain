@@ -83,15 +83,26 @@ contract TrustChain {
         string memory boxId,
         ProductInput[] calldata items
     ) external {
+        require(bytes(batchNumber).length > 0, "Missing batch number");
+        require(bytes(boxId).length > 0, "Missing box ID");
         require(items.length > 0, "Empty batch");
 
         for (uint256 i = 0; i < items.length; i++) {
             ProductInput calldata p = items[i];
+            require(bytes(p.productId).length > 0, "Missing product ID");
 
             require(
                 bytes(products[p.productId].productId).length == 0,
                 "Product already exists"
             );
+
+            for (uint256 j = 0; j < i; j++) {
+                require(
+                    keccak256(bytes(items[j].productId)) !=
+                        keccak256(bytes(p.productId)),
+                    "Duplicate product ID in batch"
+                );
+            }
 
             products[p.productId] = Product(
                 p.productId,

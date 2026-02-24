@@ -1,453 +1,634 @@
-// src/pages/Dashboards/RetailerDashboard.js
 import React, { useState } from "react";
-import { ethers } from "ethers";
 import {
-  connectBlockchain,
   getProduct,
   getProductIdsByBox,
+  getBoxDetails,
   verifyBox,
-  saleComplete
-} from "../../trustChain"; // adjust relative path if your trustChain is elsewhere
-import "../../index2.css";
-
-/*
- RetailerDashboard
- - Path: src/pages/Dashboards/RetailerDashboard.js
- - Features:
-   * Connect wallet
-   * Search a boxId -> shows product count + names
-   * Verify box -> marks all products verified (calls verifyRetailer)
-   * Scan product: paste scanned dynamic code -> verifies using product.specs.sealSeed
-   * Mark product as sold (seal broken) -> calls saleComplete
-   * Premium UI that uses your index2.css. Image uses objectFit:'contain' so it's NOT zoomed.
- Notes:
-  - Dynamic seal scheme: keccak256( toUtf8Bytes(`${productId}|${seed}|${windowNumber}`) )
-  - Checks windows [-1, 0, +1] where window is Math.floor(Date.now()/(windowSeconds*1000))
-  - Manufacturer must provide `specs.sealSeed` in product.specs (or adapt to your secret scheme)
-*/
+  saleComplete,
+  getProductDetails,
+  markProductSoldInBackend
+} from "../../trustChain";
+import {
+  FaBoxOpen,
+  FaSearch,
+  FaShieldAlt,
+  FaQrcode,
+  FaCheckCircle,
+  FaTimesCircle,
+  FaShoppingCart,
+  FaTag,
+  FaBoxes,
+  FaMobileAlt,
+  FaInfoCircle,
+  FaMapMarkerAlt,
+  FaMoneyBillWave,
+  FaEye,
+  FaPalette,
+  FaCube,
+  FaCalendarAlt,
+  FaClipboardCheck,
+  FaTruck
+} from "react-icons/fa";
+import "../../dash.css";
+import BackButton from "../../components/BackButton";
 
 const RetailerDashboard = () => {
-  const [walletConnected, setWalletConnected] = useState(false);
+  const retailerId =
+    localStorage.getItem("retailerId") ||
+    localStorage.getItem("authEmail") ||
+    "Retailer";
+
   const [status, setStatus] = useState("");
+  const [activeAction, setActiveAction] = useState("verifyBox");
+
   const [boxId, setBoxId] = useState("");
-  const [boxProducts, setBoxProducts] = useState([]); // minimal info: { productId, name }
+  const [boxProducts, setBoxProducts] = useState([]);
+  const [boxSummary, setBoxSummary] = useState(null);
   const [isVerifyingBox, setIsVerifyingBox] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [isViewingProduct, setIsViewingProduct] = useState(false);
 
   const [scanProductId, setScanProductId] = useState("");
-  const [scannedCode, setScannedCode] = useState("");
-  const [scanResult, setScanResult] = useState(null); // { ok, message, product }
+  const [secretKeyInput, setSecretKeyInput] = useState("");
+  const [scanResult, setScanResult] = useState(null);
   const [isVerifyingSeal, setIsVerifyingSeal] = useState(false);
+  const [buyerEmail, setBuyerEmail] = useState("");
+  const [saleReceipt, setSaleReceipt] = useState(null);
 
-  // Helper: connect wallet
-  const handleConnect = async () => {
-    try {
-      await connectBlockchain();
-      setWalletConnected(true);
-      setStatus("");
-    } catch (e) {
-      console.error(e);
-      setWalletConnected(false);
-      setStatus("Connect failed: " + (e?.message || e));
-    }
-  };
-
-  // Fetch product IDs for a box and then fetch minimal product info (name + id)
   const handleFetchBox = async () => {
     setStatus("");
     setBoxProducts([]);
+    setBoxSummary(null);
+    setSelectedProduct(null);
     try {
-      if (!boxId || boxId.trim() === "") {
+      const bid = String(boxId || "").trim();
+      if (!bid) {
         setStatus("Enter a Box ID first.");
         return;
       }
 
-      const ids = await getProductIdsByBox(boxId.trim());
-      const fetched = [];
-      for (const id of ids) {
-        try {
-          const p = await getProduct(id);
-          fetched.push({
-            productId: p.productId || id,
-            name: p.name || "(no name)"
-          });
-        } catch {
-          // partial fallback
-          fetched.push({ productId: id, name: "(error fetching name)" });
-        }
-      }
-      setBoxProducts(fetched);
-      setStatus(`Box ${boxId.trim()} — ${fetched.length} product(s) found.`);
+      const ids = await getProductIdsByBox(bid);
+      const products = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const p = await getProduct(id);
+            return {
+              productId: p.productId || id,
+              name: p.name || "(no name)",
+              verifiedByRetailer: !!p.verifiedByRetailer,
+              sold: !!p.sold
+            };
+          } catch {
+            return { productId: id, name: "(fetch failed)", verifiedByRetailer: false, sold: false };
+          }
+        })
+      );
+
+      const summary = await getBoxDetails(bid).catch(() => null);
+      setBoxSummary(summary);
+      setBoxProducts(products);
     } catch (e) {
-      console.error(e);
       setStatus("Fetch box failed: " + (e?.message || e));
-      setBoxProducts([]);
     }
   };
 
-  // Verify all products in the currently loaded box
   const handleVerifyBox = async () => {
-    if (!boxProducts || boxProducts.length === 0) {
-      setStatus("No products loaded for this box. Click Search Box first.");
+    if (!boxProducts.length) {
+      setStatus("No products loaded. Search by Box ID first.");
       return;
     }
-
     setIsVerifyingBox(true);
     setStatus("");
     try {
-      await verifyBox(boxId);
-      setStatus(`All ${boxProducts.length} product(s) verified for box ${boxId}.`);
-      // re-fetch to update statuses if desired (we only fetched minimal info for box)
+      const bid = String(boxId || "").trim();
+      const verifyResult = await verifyBox(bid);
+
+      // Refresh box + product statuses after successful verify sync.
+      const summary = await getBoxDetails(bid).catch(() => null);
+      const refreshed = await Promise.all(
+        boxProducts.map(async (x) => {
+          try {
+            const p = await getProduct(x.productId);
+            return {
+              productId: p.productId || x.productId,
+              name: p.name || x.name,
+              verifiedByRetailer: !!p.verifiedByRetailer,
+              sold: !!p.sold
+            };
+          } catch {
+            return x;
+          }
+        })
+      );
+      setBoxSummary(summary);
+      setBoxProducts(refreshed);
+      if (verifyResult?.alreadyVerified) {
+        setStatus(`Box ${bid} is already verified. Status refreshed.`);
+      } else if (verifyResult?.backendSynced) {
+        setStatus(`Verification completed for box ${bid}. All statuses synced.`);
+      } else {
+        setStatus(`Verification completed for box ${bid}. Blockchain updated.`);
+      }
     } catch (e) {
-      console.error(e);
       setStatus("Verify box failed: " + (e?.message || e));
     } finally {
       setIsVerifyingBox(false);
     }
   };
 
-  // Compute expected keccak256-based dynamic seal for (productId, seed, window)
-  const computeExpectedSeal = (productId, seed, windowNumber) => {
-    const bytes = ethers.toUtf8Bytes(`${productId}|${seed}|${windowNumber}`);
-    return ethers.keccak256(bytes); // 0x...
+  const handleViewProduct = async (productId) => {
+    setStatus("");
+    if (selectedProduct?.productId === productId) {
+      setSelectedProduct(null);
+      return;
+    }
+    setIsViewingProduct(true);
+    try {
+      const p = await getProduct(productId);
+      setSelectedProduct(p);
+    } catch (e) {
+      setSelectedProduct(null);
+      setStatus("View product failed: " + (e?.message || e));
+    } finally {
+      setIsViewingProduct(false);
+    }
   };
 
-  // Verify scanned code for a product using seed inside product.specs.sealSeed
   const handleVerifySeal = async () => {
+    const pid = String(scanProductId || "").trim();
+    setSaleReceipt(null);
+    setBuyerEmail("");
     setScanResult(null);
     setStatus("");
     setIsVerifyingSeal(true);
-
     try {
-      const pid = (scanProductId || "").trim();
+      const provided = String(secretKeyInput || "").trim();
       if (!pid) {
-        setStatus("Enter Product ID to verify.");
-        setIsVerifyingSeal(false);
+        setStatus("Enter Product ID.");
         return;
       }
-      const p = await getProduct(pid);
-      if (!p || !p.productId) {
-        setStatus("Product not found on chain.");
-        setIsVerifyingSeal(false);
-        return;
-      }
-
-      // seed should be present in specs
-      const seed = p.specs && p.specs.sealSeed ? p.specs.sealSeed : null;
-      if (!seed) {
-        setStatus("No sealSeed present in product specs — cannot verify dynamic seal.");
-        setIsVerifyingSeal(false);
-        return;
-      }
-
-      const provided = (scannedCode || "").trim();
       if (!provided) {
-        setStatus("Paste the scanned dynamic code (from NFC/QR).");
-        setIsVerifyingSeal(false);
+        setStatus("Enter product secret key.");
         return;
       }
 
-      const normalizedProvided = provided.startsWith("0x") ? provided.toLowerCase() : provided;
-
-      const windowSeconds = 60; // 60s window
-      const nowWindow = Math.floor(Date.now() / (windowSeconds * 1000));
-
-      let matched = false;
-      let matchedWindow = null;
-      for (let offset = -1; offset <= 1; offset++) {
-        const w = nowWindow + offset;
-        const expected = computeExpectedSeal(p.productId, seed, w);
-        if (expected.toLowerCase() === normalizedProvided.toLowerCase()) {
-          matched = true;
-          matchedWindow = w;
-          break;
-        }
+      const details = await getProductDetails(pid);
+      const chain = await getProduct(pid).catch(() => null);
+      const expectedSecret = String(details?.productSecret || "").trim();
+      if (!expectedSecret) {
+        setStatus("No product secret available for this product.");
+        return;
       }
+      const matched = expectedSecret.toLowerCase() === provided.toLowerCase();
 
-      if (matched) {
+      const mergedProduct = {
+        ...details,
+        shipped: Boolean(chain?.shipped || details?.shipped),
+        verifiedByRetailer: Boolean(chain?.verifiedByRetailer || details?.verified),
+        sold: Boolean(chain?.sold || details?.sold),
+        manufacturer: details?.manufacturerId || chain?.manufacturer || "-"
+      };
+
+      setScanResult({
+        ok: matched,
+        message: matched
+          ? "Secret key matches this product. Product is genuine."
+          : "Product is FAKE. The entered secret key does not match this product.",
+        product: mergedProduct
+      });
+    } catch (e) {
+      const message = String(e?.message || e || "");
+      if (message.toLowerCase().includes("product not found")) {
         setScanResult({
-          ok: true,
-          message: `Dynamic seal valid (matched window ${matchedWindow}).`,
-          product: p
+          ok: false,
+          message: "Product is FAKE. Product ID was not found in TrustChain records.",
+          product: {
+            productId: pid || "-",
+            boxId: "-",
+            batchId: "-",
+            name: "-",
+            modelNumber: "-",
+            manufacturer: "-",
+            manufacturerDate: "-",
+            serialNumber: "-",
+            color: "-",
+            warrantyPeriod: "-",
+            retailerId: "-",
+            retailerLocation: "-",
+            price: "-",
+            shipped: false,
+            verifiedByRetailer: false,
+            sold: false
+          }
         });
         setStatus("");
       } else {
-        setScanResult({
-          ok: false,
-          message: "Scanned code mismatch — seal invalid or out-of-sync.",
-          product: p
-        });
-        setStatus("");
+        setStatus("Seal verification failed: " + message);
       }
-    } catch (e) {
-      console.error(e);
-      setStatus("Seal verification failed: " + (e?.message || e));
     } finally {
       setIsVerifyingSeal(false);
     }
   };
 
-  // Mark product as sold (calls saleComplete)
   const handleMarkSold = async (productIdToSell) => {
     try {
-      setStatus("Marking product sold...");
-      await saleComplete(productIdToSell);
-      setStatus("Product marked as SOLD on-chain.");
-      // refresh scanned product details if currently displayed
-      if (scanResult && scanResult.product && scanResult.product.productId === productIdToSell) {
-        const p = await getProduct(productIdToSell);
-        setScanResult({ ...scanResult, product: p });
+      const email = String(buyerEmail || "").trim();
+      if (!email) {
+        setStatus("Enter buyer email before selling.");
+        return;
+      }
+      setStatus("Marking as sold...");
+
+      let saleTxHash = "";
+      let soldOnChain = false;
+
+      try {
+        const saleTx = await saleComplete(productIdToSell);
+        saleTxHash = saleTx?.txHash || "";
+        soldOnChain = true;
+      } catch (chainErr) {
+        const chainMessage = String(chainErr?.message || chainErr || "");
+        // If already sold on-chain, continue with backend sync/email.
+        if (!chainMessage.toLowerCase().includes("already sold")) {
+          throw chainErr;
+        }
+        soldOnChain = true;
+      }
+
+      try {
+        const backendResult = await markProductSoldInBackend({
+          productId: productIdToSell,
+          buyerEmail: email,
+          txHash: saleTxHash
+        });
+        setSaleReceipt(backendResult?.sale || null);
+        setStatus(
+          backendResult?.email?.sent
+            ? "Product sold and confirmation email sent."
+            : `Product sold. Email not sent: ${backendResult?.email?.reason || "Email service not configured"}`
+        );
+      } catch (backendErr) {
+        const backendMessage = String(backendErr?.message || backendErr || "Backend sync failed");
+        if (soldOnChain) {
+          setStatus(`Product sold on-chain. Backend sync/email pending: ${backendMessage}`);
+        } else {
+          throw backendErr;
+        }
+      }
+
+      if (scanResult?.product?.productId === productIdToSell) {
+        const p = await getProductDetails(productIdToSell);
+        setScanResult((prev) => ({ ...prev, product: p }));
       }
     } catch (e) {
-      console.error(e);
       setStatus("Mark sold failed: " + (e?.message || e));
     }
   };
 
-  // UI
-  return (
-    <div className="premium-dashboard" style={{ width: "100vw", padding: "20px" }}>
-      <h2 style={{ marginTop: 0, marginBottom: 18 }}>Retailer Dashboard</h2>
+  const verifiedProductsCount = boxProducts.filter((p) => p.verifiedByRetailer).length;
+  const pendingProductsCount = Math.max(boxProducts.length - verifiedProductsCount, 0);
 
-      {/* Wallet connect */}
-      <div className="center" style={{ marginBottom: "20px" }}>
-        <button
-          className="btn-primary"
-          onClick={handleConnect}
-          style={{
-            backgroundColor: walletConnected ? "#28a745" : "#007bff",
-            minWidth: 140
-          }}
+  return (
+    <div className="dashboard retailer-theme manufacturer-theme">
+      <BackButton to="/login/retailer" />
+      <div className="sidebar">
+        <div className="sidebar-brand">
+          <img src="/bc1.png" alt="TrustChain Logo" className="sidebar-brand-logo" />
+          <h2 className="logo-gradient">TrustChain</h2>
+        </div>
+
+        <div className="profile-card">
+          <div className="profile-avatar">{(retailerId || "R")[0].toUpperCase()}</div>
+          <div className="profile-meta">
+            <div className="profile-name">Retailer</div>
+            <div className="profile-id">ID: {retailerId}</div>
+          </div>
+        </div>
+
+        <div
+          className={`sidebar-btn ${activeAction === "verifyBox" ? "active" : ""}`}
+          onClick={() => setActiveAction("verifyBox")}
         >
-          {walletConnected ? "Connected" : "Connect Wallet"}
-        </button>
+          <FaBoxOpen /> Verify Box
+        </div>
+
+        <div
+          className={`sidebar-btn ${activeAction === "verifySeal" ? "active" : ""}`}
+          onClick={() => setActiveAction("verifySeal")}
+        >
+          <FaShieldAlt /> Verify Seal
+        </div>
+
       </div>
 
-      {/* Box section */}
-      <section style={{ marginBottom: 32 }}>
-        <h3 style={{ color: "#ffffff", marginBottom: 18, paddingTop: 12 }}>Box Arrival — Scan & Verify</h3>
-        <div className="form-row" style={{ alignItems: "flex-end", gap: 0, marginBottom: 10 }}>
-          <div className="form-group" style={{ minWidth: 260, marginRight: 8 }}>
-            <label style={{ fontWeight: 500, marginBottom: 0, display: "block" }}>Box ID</label>
-            <input
-              className="login-input"
-              placeholder="Enter / scan Box ID (e.g. BOX123456)"
-              value={boxId}
-              onChange={(e) => setBoxId(e.target.value)}
-              style={{ width: 280, marginTop: 5 }}
-            />
-          </div>
-          <button
-            className="btn-outline"
-            onClick={handleFetchBox}
-            style={{ minWidth: 120, marginLeft: 8, marginBottom: 0, alignSelf: "flex-end" }}
-          >
-            Search Box
-          </button>
-          <button
-            className="btn-primary"
-            onClick={handleVerifyBox}
-            disabled={boxProducts.length === 0 || isVerifyingBox}
-            style={{
-              backgroundColor: "#28a745",
-              color: "#fff",
-              minWidth: 160,
-              marginLeft: 8,
-              marginBottom: 0,
-              alignSelf: "flex-end"
-            }}
-          >
-            {isVerifyingBox ? "Verifying..." : `Verify Box (${boxProducts.length})`}
-          </button>
-        </div>
-
-        {boxProducts.length > 0 && (
-          <div className="fetched-product-card" style={{ marginTop: 12, padding: 16, display: "block" }}>
-            <strong>Box {boxId} — {boxProducts.length} product(s)</strong>
-            <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 18 }}>
-              {boxProducts.map(p => (
-                <li key={p.productId} style={{ marginBottom: 2, }}>
-                  <strong>{p.name}</strong> — <em>{p.productId}</em>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </section>
-      <section style={{ marginBottom: 32 }}>
-        <h3 style={{ color: "#ffffff", marginBottom: 12 }}>Product Authenticity (Inner Seal)</h3>
-        <div className="form-row" style={{ alignItems: "flex-end", gap: 18, marginBottom: 10 }}>
-          <div className="form-group" style={{ minWidth: 220 }}>
-            <label style={{ fontWeight: 500, marginBottom: 4 }}>Product ID</label>
-            <input
-              className="login-input"
-              placeholder="Enter Product ID (e.g. P123456)"
-              value={scanProductId}
-              onChange={(e) => setScanProductId(e.target.value)}
-              style={{ width: 220 }}
-            />
-          </div>
-          <div className="form-group" style={{ minWidth: 320 }}>
-            <label style={{ fontWeight: 500, marginBottom: 4 }}>Dynamic Code</label>
-            <input
-              className="login-input"
-              placeholder="Paste scanned dynamic code (0x... from NFC/QR)"
-              value={scannedCode}
-              onChange={(e) => setScannedCode(e.target.value)}
-              style={{ width: 320 }}
-            />
-          </div>
-          <button
-            className="btn-outline"
-            onClick={handleVerifySeal}
-            disabled={isVerifyingSeal}
-            style={{ minWidth: 120 }}
-          >
-            {isVerifyingSeal ? "Checking..." : "Verify Seal"}
-          </button>
-        </div>
-
-        {/* Scan result / product preview */}
-        {scanResult && (
-          <div
-            className="fetched-product-card premium"
-            style={{
-              display: "flex",
-              padding: 24,
-              gap: 28,
-              marginTop: 18,
-              alignItems: "flex-start"
-            }}
-          >
-            <div
-              className="fetched-image"
-              style={{
-                flex: "0 0 240px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center"
-              }}
-            >
-              {scanResult.product && scanResult.product.image ? (
-                <img
-                  src={scanResult.product.image}
-                  alt={scanResult.product.name}
-                  style={{
-                    width: 220,
-                    height: 220,
-                    objectFit: "contain",
-                    borderRadius: 10,
-                    boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
-                    background: "#0b0c10"
-                  }}
+      <div className="dashboard-right retailer-right">
+        {activeAction === "verifyBox" && (
+          <div className="premium-card retailer-verify-card">
+            <h2 className="section-title"><FaBoxOpen /> Verify by Box ID</h2>
+            <div className="verifyx-searchbar">
+              <div className="verifyx-input-wrap">
+                <FaSearch />
+                <input
+                  placeholder="Enter / scan Box ID"
+                  value={boxId}
+                  onChange={(e) => setBoxId(e.target.value)}
                 />
-              ) : (
-                <div
-                  style={{
-                    width: 220,
-                    height: 140,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background: "#0b0c10",
-                    borderRadius: 8
-                  }}
-                >
-                  <span style={{ color: "#999" }}>No image</span>
-                </div>
-              )}
+              </div>
+              <button className="verifyx-search-btn" onClick={handleFetchBox}>
+                Search Box
+              </button>
             </div>
 
-            <div className="fetched-details" style={{ flex: 1 }}>
-              <h3 style={{ marginTop: 0, marginBottom: 10 }}>{scanResult.product?.name || "(product)"}</h3>
-              <div
-                className="details-grid"
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(2, 1fr)",
-                  gap: 10,
-                  marginBottom: 10
-                }}
-              >
-                <div>
-                  <label style={{ fontWeight: 500 }}>Product ID:</label>
-                  <div>{scanResult.product?.productId}</div>
-                </div>
-                <div>
-                  <label style={{ fontWeight: 500 }}>Box ID:</label>
-                  <div>{scanResult.product?.boxId}</div>
-                </div>
-                <div>
-                  <label style={{ fontWeight: 500 }}>Manufacturer:</label>
-                  <div>{scanResult.product?.manufacturer}</div>
-                </div>
-                <div>
-                  <label style={{ fontWeight: 500 }}>Model:</label>
-                  <div>{scanResult.product?.modelNumber}</div>
-                </div>
-                <div>
-                  <label style={{ fontWeight: 500 }}>Serial:</label>
-                  <div>{scanResult.product?.serialNumber}</div>
-                </div>
-                <div>
-                  <label style={{ fontWeight: 500 }}>Price:</label>
-                  <div>₹{scanResult.product?.price}</div>
+            {boxSummary && (
+              <div className="verifyx-summary">
+                <div className="verifyx-stat"><span>Batch</span><strong>{boxSummary.batchId || "-"}</strong></div>
+                <div className="verifyx-stat"><span>Box ID</span><strong>{boxSummary.boxId || boxId}</strong></div>
+                <div className="verifyx-stat"><span>Total Products</span><strong>{boxSummary.totalProducts ?? boxProducts.length}</strong></div>
+                <div className="verifyx-stat verified"><span>Verified</span><strong>{verifiedProductsCount}</strong></div>
+                <div className="verifyx-stat pending"><span>Pending</span><strong>{pendingProductsCount}</strong></div>
+              </div>
+            )}
+
+            {boxProducts.length > 0 && (
+              <div className="verifyx-main">
+                <section className="verifyx-panel verifyx-left">
+                  <h3>Products in Box</h3>
+                  <div className="verifyx-list">
+                    {boxProducts.map((p) => (
+                      <div key={p.productId} className="verifyx-row">
+                        <div className="verifyx-row-text">
+                          <strong>{p.name}</strong>
+                          <span>{p.productId}</span>
+                        </div>
+                        <div className="verifyx-row-actions">
+                          <span className={`verifyx-pill ${p.sold ? "sold" : p.verifiedByRetailer ? "ok" : "pending"}`}>
+                            {p.sold ? "Sold" : p.verifiedByRetailer ? "Verified" : "Not Verified"}
+                          </span>
+                          <button
+                            className="verifyx-eye"
+                            onClick={() => handleViewProduct(p.productId)}
+                            title="View Product"
+                            aria-label="View Product"
+                          >
+                            <FaEye />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="verifyx-footer">
+                    <button
+                      className="verifyx-verify-btn"
+                      onClick={handleVerifyBox}
+                      disabled={isVerifyingBox}
+                    >
+                      {isVerifyingBox
+                        ? "Verifying..."
+                        : boxSummary?.verified
+                          ? "Verified (Sync/Refresh)"
+                          : `Verify Box (${boxProducts.length})`}
+                    </button>
+                  </div>
+                </section>
+
+                <section className="verifyx-panel verifyx-right">
+                  {isViewingProduct && <div className="verifyx-empty">Loading product details...</div>}
+
+                  {!selectedProduct && !isViewingProduct && (
+                    <div className="verifyx-empty">
+                      <FaEye />
+                      <p>Select a product using the eye icon to preview details.</p>
+                    </div>
+                  )}
+
+                  {selectedProduct && !isViewingProduct && (
+                    <div className="verifyx-preview">
+                      <div className="product-card premium-product-card retailer-product-card">
+                        <div className="product-media">
+                          <div className={`retailer-product-image-wrap ${selectedProduct.sold ? "is-sold" : ""}`}>
+                            <img src={selectedProduct.image || "/mob.jpg"} alt={selectedProduct.name || "Product"} />
+                            {selectedProduct.sold && (
+                              <img src="/sold.png" alt="Sold Product" className="retailer-sold-overlay" />
+                            )}
+                          </div>
+                        </div>
+                        <div className="product-details-col">
+                          <div className="product-info-grid">
+                            <div className="detail-item"><FaTag /><span><strong>Product ID:</strong> {selectedProduct.productId || "-"}</span></div>
+                            <div className="detail-item"><FaMobileAlt /><span><strong>Name:</strong> {selectedProduct.name || "-"}</span></div>
+                            <div className="detail-item"><FaInfoCircle /><span><strong>Model:</strong> {selectedProduct.modelNumber || "-"}</span></div>
+                            <div className="detail-item"><FaPalette /><span><strong>Color:</strong> {selectedProduct.color || "-"}</span></div>
+                            <div className="detail-item"><FaTag /><span><strong>Manufacturer:</strong> {selectedProduct.manufacturer || selectedProduct.manufacturerId || "-"}</span></div>
+                            <div className="detail-item"><FaMapMarkerAlt /><span><strong>Location:</strong> {selectedProduct.manufacturePlace || "-"}</span></div>
+                            <div className="detail-item"><FaCube /><span><strong>Batch:</strong> {selectedProduct.batchId || selectedProduct.batchNumber || "-"}</span></div>
+                            <div className="detail-item"><FaBoxes /><span><strong>Box:</strong> {selectedProduct.boxId || "-"}</span></div>
+                            <div className="detail-item"><FaCalendarAlt /><span><strong>Warranty:</strong> {selectedProduct.warrantyPeriod || "-"}</span></div>
+                            <div className="detail-item"><FaMoneyBillWave /><span><strong>Price:</strong> Rs {selectedProduct.price || "-"}</span></div>
+                          </div>
+
+                          <div className="status-row">
+                            <div className="status-card">
+                              <div className="status-head">
+                                <span className="status-top-icon"><FaClipboardCheck /></span>
+                                <span>Registered</span>
+                              </div>
+                              {selectedProduct.registered ? <FaCheckCircle className="status-icon ok" /> : <FaTimesCircle className="status-icon no" />}
+                            </div>
+                            <div className="status-card">
+                              <div className="status-head">
+                                <span className="status-top-icon"><FaTruck /></span>
+                                <span>Shipped</span>
+                              </div>
+                              {selectedProduct.shipped ? <FaCheckCircle className="status-icon ok" /> : <FaTimesCircle className="status-icon no" />}
+                            </div>
+                            <div className="status-card">
+                              <div className="status-head">
+                                <span className="status-top-icon"><FaShieldAlt /></span>
+                                <span>Verified</span>
+                              </div>
+                              {(selectedProduct.verified || selectedProduct.verifiedByRetailer) ? <FaCheckCircle className="status-icon ok" /> : <FaTimesCircle className="status-icon no" />}
+                            </div>
+                            <div className="status-card">
+                              <div className="status-head">
+                                <span className="status-top-icon"><FaShoppingCart /></span>
+                                <span>Sold</span>
+                              </div>
+                              {selectedProduct.sold ? <FaCheckCircle className="status-icon ok" /> : <FaTimesCircle className="status-icon no" />}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeAction === "verifySeal" && (
+          <div className="premium-card">
+            <h2 className="section-title"><FaQrcode /> Product Authenticity (Secret Key)</h2>
+
+            <div className="retailer-seal-form">
+              <div className="form-group">
+                <label>Product ID</label>
+                <div className="input-icon">
+                  <FaTag />
+                  <input
+                    placeholder="Enter Product ID"
+                    value={scanProductId}
+                    onChange={(e) => setScanProductId(e.target.value)}
+                  />
                 </div>
               </div>
+              <div className="form-group">
+                <label>Secret Key</label>
+                <div className="input-icon">
+                  <FaInfoCircle />
+                  <input
+                    placeholder="Paste product secret key"
+                    value={secretKeyInput}
+                    onChange={(e) => setSecretKeyInput(e.target.value)}
+                  />
+                </div>
+              </div>
+              <button
+                className="btn-primary fetch-btn-inline retailer-btn-secondary"
+                onClick={handleVerifySeal}
+                disabled={isVerifyingSeal}
+              >
+                {isVerifyingSeal ? "Checking..." : "Verify Authenticity"}
+              </button>
+            </div>
 
-              <div style={{ marginTop: 14 }}>
-                <label style={{ fontWeight: 600 }}>Seal Check:</label>
-                <div style={{ marginTop: 8 }}>
-                  {scanResult.ok ? (
-                    <div style={{ color: "#2ecc71", fontWeight: 700 }}>
-                      ✔ Authentic — dynamic seal matches
-                      <div style={{ color: "#a9dcbf", fontWeight: 500 }}>{scanResult.message}</div>
+            {scanResult && (
+              <div className={scanResult.ok ? "product-card premium-product-card retailer-product-card" : "retailer-auth-result-full"}>
+                {scanResult.ok && (
+                  <div className="product-media">
+                    <div className={`retailer-product-image-wrap ${scanResult.product?.sold ? "is-sold" : ""}`}>
+                      {scanResult.product?.image ? (
+                        <img src={scanResult.product.image} alt={scanResult.product.name} />
+                      ) : (
+                        <div className="retailer-no-image">No image</div>
+                      )}
+                      {scanResult.product?.sold && (
+                        <img src="/sold.png" alt="Sold Product" className="retailer-sold-overlay" />
+                      )}
                     </div>
-                  ) : (
-                    <div style={{ color: "#e74c3c", fontWeight: 700 }}>
-                      ✖ Not authentic — scanned code mismatch
-                      <div style={{ color: "#f2c6c6", fontWeight: 500 }}>{scanResult.message}</div>
+                    {!scanResult.product?.sold && (
+                      <img src="/ver.png" alt="Verified Genuine" className="retailer-auth-badge-img genuine" />
+                    )}
+                  </div>
+                )}
+
+                <div className="product-details-col">
+                  {scanResult.ok && (
+                    <div className="product-info-grid">
+                      <div className="detail-item"><FaTag /><span><strong>Product ID:</strong> {scanResult.product?.productId}</span></div>
+                      <div className="detail-item"><FaBoxes /><span><strong>Box ID:</strong> {scanResult.product?.boxId || "-"}</span></div>
+                      <div className="detail-item"><FaCube /><span><strong>Batch ID:</strong> {scanResult.product?.batchId || "-"}</span></div>
+                      <div className="detail-item"><FaMobileAlt /><span><strong>Name:</strong> {scanResult.product?.name || "-"}</span></div>
+                      <div className="detail-item"><FaInfoCircle /><span><strong>Model:</strong> {scanResult.product?.modelNumber || "-"}</span></div>
+                      <div className="detail-item"><FaMapMarkerAlt /><span><strong>Manufacturer:</strong> {scanResult.product?.manufacturer || "-"}</span></div>
+                      <div className="detail-item"><FaCalendarAlt /><span><strong>Mfg Date:</strong> {scanResult.product?.manufacturerDate || "-"}</span></div>
+                      <div className="detail-item"><FaInfoCircle /><span><strong>Serial:</strong> {scanResult.product?.serialNumber || "-"}</span></div>
+                      <div className="detail-item"><FaPalette /><span><strong>Color:</strong> {scanResult.product?.color || "-"}</span></div>
+                      <div className="detail-item"><FaInfoCircle /><span><strong>Warranty:</strong> {scanResult.product?.warrantyPeriod || "-"}</span></div>
+                      <div className="detail-item"><FaTag /><span><strong>Retailer ID:</strong> {scanResult.product?.retailerId || "-"}</span></div>
+                      <div className="detail-item"><FaMapMarkerAlt /><span><strong>Retailer Location:</strong> {scanResult.product?.retailerLocation || "-"}</span></div>
+                      <div className="detail-item"><FaMoneyBillWave /><span><strong>Price:</strong> Rs {scanResult.product?.price || "-"}</span></div>
+                    </div>
+                  )}
+
+                  <div className={`retailer-seal-row ${scanResult.ok && scanResult.product?.sold ? "is-sold" : ""}`}>
+                    <div className="retailer-seal-result">
+                      {scanResult.ok ? (
+                        <div className="retailer-seal-valid">
+                          <div className="retailer-seal-head">
+                            <span className="retailer-seal-icon">
+                              <FaCheckCircle />
+                            </span>
+                            <span>GENUINE</span>
+                          </div>
+                          {!scanResult.product?.sold && <small>{scanResult.message}</small>}
+                        </div>
+                      ) : (
+                        <div className="retailer-seal-invalid">
+                          <div className="retailer-seal-head">
+                            <span className="retailer-seal-icon">
+                              <FaTimesCircle />
+                            </span>
+                            <span>FAKE</span>
+                          </div>
+                          <small>{scanResult.message}</small>
+                        </div>
+                      )}
+                    </div>
+
+                    {scanResult.ok && scanResult.product?.sold && (
+                      <div className="retailer-warning retailer-sold-warning">
+                        This product is already sold.
+                      </div>
+                    )}
+                  </div>
+
+                  {!scanResult.ok && (
+                    <div className="retailer-fake-actions">
+                      <img src="/rej.png" alt="Rejected Fake" className="retailer-auth-badge-img fake" />
+                      <div className="retailer-fake-text">
+                        <p>Check Product ID and Secret Key once more.</p>
+                        <p>If still FAKE, do not sell this product.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {scanResult.ok && !scanResult.product?.sold && scanResult.product?.shipped && scanResult.product?.verifiedByRetailer && (
+                    <div className="retailer-sell-form">
+                      <div className="input-icon">
+                        <FaInfoCircle />
+                        <input
+                          type="email"
+                          placeholder="Buyer email (required for sale receipt)"
+                          value={buyerEmail}
+                          onChange={(e) => setBuyerEmail(e.target.value)}
+                        />
+                      </div>
+                      <button
+                        className="btn-primary retailer-btn-sold"
+                        onClick={() => handleMarkSold(scanResult.product.productId)}
+                      >
+                        <FaShoppingCart /> Mark as Sold
+                      </button>
+                    </div>
+                  )}
+
+                  {scanResult.ok && (!scanResult.product?.shipped || !scanResult.product?.verifiedByRetailer) && (
+                    <div className="retailer-warning">
+                      Product can be sold only after shipping and retailer verification.
+                    </div>
+                  )}
+
+                  {saleReceipt && (
+                    <div className="retailer-sale-info">
+                      <h4>Sale Details</h4>
+                      <div><strong>Product:</strong> {saleReceipt.name} ({saleReceipt.productId})</div>
+                      <div><strong>Batch/Box:</strong> {saleReceipt.batchId} / {saleReceipt.boxId}</div>
+                      <div><strong>Retailer:</strong> {saleReceipt.retailerId} ({saleReceipt.retailerLocation})</div>
+                      <div><strong>Buyer Email:</strong> {buyerEmail}</div>
+                      <div><strong>Transaction:</strong> {saleReceipt.txHash}</div>
+                      <div><strong>Sold At:</strong> {saleReceipt.soldAt}</div>
                     </div>
                   )}
                 </div>
-
-                {scanResult.ok && (
-                  <div style={{ marginTop: 18 }}>
-                    <button
-                      className="btn-primary"
-                      style={{
-                        backgroundColor: "#e74c3c",
-                        color: "#fff",
-                        minWidth: 180
-                      }}
-                      onClick={() => handleMarkSold(scanResult.product.productId)}
-                    >
-                      Mark as Sold (seal broken)
-                    </button>
-                  </div>
-                )}
               </div>
-            </div>
+            )}
           </div>
         )}
-      </section>
 
-      {/* Status / error box */}
-      {status && (
-        <div style={{ marginTop: 8 }}>
-          <div
-            className="login-error"
-            style={{
-              background: "#071218",
-              color: "#ffdede",
-              padding: 10,
-              borderRadius: 6,
-              marginBottom: 0
-            }}
-          >
-            {status}
-          </div>
-        </div>
-      )}
+        {status && <p className="register-status retailer-status">{status}</p>}
+      </div>
+
     </div>
   );
 };

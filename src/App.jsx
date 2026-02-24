@@ -1,12 +1,13 @@
 // src/App.jsx
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Home from "./pages/Home";
+import Home from "./pages/Home.jsx";
 import RoleSelect from "./pages/RoleSelect";
 import Login from "./pages/Login";
 import UserDashboard from "./pages/Dashboards/UserDashboard";
 import RetailerDashboard from "./pages/Dashboards/RetailerDashboard";
 import ManufacturerDashboard from "./pages/Dashboards/ManufacturerDashboard";
 import AdminDashboard from "./pages/Dashboards/AdminDashboard";
+import BlockchainData from "./pages/BlockchainData";
 
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="/dashboard/retailer" element={<RetailerDashboard />} />
         <Route path="/dashboard/manufacturer" element={<ManufacturerDashboard />} />
         <Route path="/dashboard/admin" element={<AdminDashboard />} />
+        <Route path="/blockchain-data" element={<BlockchainData />} />
 
         {/* fallback */}
         <Route path="*" element={<Home />} />
