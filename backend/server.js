@@ -30,7 +30,11 @@ const abi = JSON.parse(fs.readFileSync(abiPath, "utf-8"));
 /* ================= APP SETUP ================= */
 
 const app = express();
-const allowedOrigins = ["http://localhost:5173", "http://localhost:5174"];
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "https://blockchain-1-km1m.onrender.com"
+];
 app.use(
   cors({
     origin(origin, callback) {
