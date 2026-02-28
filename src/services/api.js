@@ -2,7 +2,7 @@
 
 // frontend/src/services/api.js
 
-const BASE_URL = "http://localhost:5000";
+const BASE_URL = "https://blockchain-li7r.onrender.com";
 
 export async function requestChallenge(productId) {
   const res = await fetch(`${BASE_URL}/challenge`, {

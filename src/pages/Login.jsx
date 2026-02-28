@@ -4,7 +4,7 @@ import { User, Mail, Lock } from "lucide-react";
 import "../auth.css";
 import BackButton from "../components/BackButton";
 
-const API = "http://localhost:5000/api/auth";
+const API = "https://blockchain-li7r.onrender.com/api/auth";
 
 export default function Login() {
   const { role } = useParams();

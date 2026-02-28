@@ -1,4 +1,5 @@
 // src/App.jsx
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Home from "./pages/Home.jsx";
 import RoleSelect from "./pages/RoleSelect";
@@ -11,6 +12,10 @@ import BlockchainData from "./pages/BlockchainData";
 
 
 export default function App() {
+  useEffect(() => {
+    fetch("https://blockchain-li7r.onrender.com/api/auth").catch(() => {});
+  }, []);
+
   return (
     <BrowserRouter>
       <Routes>

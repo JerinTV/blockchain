@@ -140,7 +140,7 @@ export const registerBatch = async (batch) => {
   };
 
   // 2) Save/generate batch product data in backend DB.
-  const res = await fetch("http://localhost:5000/prepare-batch", {
+  const res = await fetch("https://blockchain-li7r.onrender.com/prepare-batch", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -249,7 +249,7 @@ const markBoxShippedInBackend = async (boxId) => {
     throw new Error("Box shipped on blockchain, but backend sync failed: login token missing.");
   }
 
-  const res = await fetch("http://localhost:5000/mark-box-shipped", {
+  const res = await fetch("https://blockchain-li7r.onrender.com/mark-box-shipped", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -356,7 +356,7 @@ export const verifyBox = async (boxId) => {
   if (alreadyVerified) {
     // Keep backend status synced if it missed a prior update.
     if (token) {
-      const res = await fetch("http://localhost:5000/mark-box-verified", {
+      const res = await fetch("https://blockchain-li7r.onrender.com/mark-box-verified", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -403,7 +403,7 @@ export const verifyBox = async (boxId) => {
 
   let backendSynced = false;
   if (token) {
-    const res = await fetch("http://localhost:5000/mark-box-verified", {
+    const res = await fetch("https://blockchain-li7r.onrender.com/mark-box-verified", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -459,7 +459,7 @@ export const markProductSoldInBackend = async ({ productId, buyerEmail, txHash }
   if (!safeProductId) throw new Error("Product ID is required.");
   if (!safeBuyerEmail) throw new Error("Buyer email is required.");
 
-  const res = await fetch("http://localhost:5000/mark-product-sold", {
+  const res = await fetch("https://blockchain-li7r.onrender.com/mark-product-sold", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -572,7 +572,7 @@ export const getRecentHistory = async (manufacturerId) => {
   const params = new URLSearchParams();
   if (manufacturerId) params.set("manufacturerId", manufacturerId);
 
-  const res = await fetch(`http://localhost:5000/recent-history?${params.toString()}`, {
+  const res = await fetch(`https://blockchain-li7r.onrender.com/recent-history?${params.toString()}`, {
     headers: {
       Authorization: `Bearer ${token}`
     }
@@ -583,7 +583,7 @@ export const getRecentHistory = async (manufacturerId) => {
 
 export const getBoxDetails = async (boxId) => {
   const token = localStorage.getItem("token");
-  const res = await fetch(`http://localhost:5000/box-details/${boxId}`, {
+  const res = await fetch(`https://blockchain-li7r.onrender.com/box-details/${boxId}`, {
     headers: {
       Authorization: `Bearer ${token}`
     }
@@ -597,7 +597,7 @@ export const getBoxDetails = async (boxId) => {
 
 export const getProductDetails = async (productId) => {
   const token = localStorage.getItem("token");
-  const res = await fetch(`http://localhost:5000/product-details/${productId}`, {
+  const res = await fetch(`https://blockchain-li7r.onrender.com/product-details/${productId}`, {
     headers: {
       Authorization: `Bearer ${token}`
     }

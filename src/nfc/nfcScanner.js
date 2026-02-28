@@ -8,7 +8,7 @@
 export async function scanNfcTag(productId, challenge) {
   console.warn("📡 NFC emulation via backend");
 
-  const res = await fetch("http://localhost:5000/nfc/sign", {
+  const res = await fetch("https://blockchain-li7r.onrender.com/nfc/sign", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
