@@ -82,6 +82,27 @@ function hashValue(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
+async function readChainProduct(productId) {
+  try {
+    return await contract.getProduct(productId);
+  } catch (err) {
+    if (err?.code === "BAD_DATA") {
+      const [network, code] = await Promise.all([
+        provider.getNetwork().catch(() => ({ chainId: "unknown" })),
+        provider.getCode(process.env.CONTRACT_ADDRESS).catch(() => "0x")
+      ]);
+      const hasCode = Boolean(code && code !== "0x");
+      const reason = hasCode
+        ? "ABI mismatch between deployed contract and backend abi.json"
+        : "No contract deployed at CONTRACT_ADDRESS on RPC_URL";
+      throw new Error(
+        `Blockchain read failed for getProduct(${productId}). ${reason}. address=${process.env.CONTRACT_ADDRESS}, chainId=${String(network?.chainId)}`
+      );
+    }
+    throw err;
+  }
+}
+
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 }
@@ -175,7 +196,7 @@ app.post("/challenge", async (req, res) => {
 
     let product;
     try {
-      product = await contract.getProduct(productId);
+      product = await readChainProduct(productId);
     } catch (bcErr) {
       console.error("âŒ Blockchain error:", bcErr);
       return res.status(500).json({ error: "Blockchain read failed" });
@@ -225,90 +246,136 @@ app.post("/nfc/sign", async (req, res) => {
   }
 });
 
-app.post("/prepare-batch", authenticate, async (req, res) => {
-  try {
-    const batch = req.body;
-    const batchId = String(batch.batchId || "").trim();
-    const boxId = String(batch.boxId || "").trim();
-    const startProductId = String(batch.startProductId || "").trim();
-    const productName = String(batch.name || "").trim();
-    const categoryValue = String(batch.category || "").trim();
-    const manufacturerIdValue = String(batch.manufacturerId || batch.manufacturer || "").trim();
-    const manufacturePlaceValue = String(batch.manufacturePlace || "").trim();
-    const modelNumberValue = String(batch.modelNumber || "").trim();
-    const warrantyPeriodValue = String(batch.warrantyPeriod || "").trim();
-    const colorValue = String(batch.color || "").trim();
-    const retailerIdValue = String(batch.retailerName || "").trim();
-    const retailerLocationValue = String(batch.retailerLocation || "").trim();
+function normalizeBatchPayload(batch) {
+  const batchId = String(batch?.batchId || "").trim();
+  const boxId = String(batch?.boxId || "").trim();
+  const startProductId = String(batch?.startProductId || "").trim();
+  const productName = String(batch?.name || "").trim();
+  const categoryValue = String(batch?.category || "").trim();
+  const manufacturerIdValue = String(batch?.manufacturerId || batch?.manufacturer || "").trim();
+  const manufacturePlaceValue = String(batch?.manufacturePlace || "").trim();
+  const modelNumberValue = String(batch?.modelNumber || "").trim();
+  const warrantyPeriodValue = String(batch?.warrantyPeriod || "").trim();
+  const colorValue = String(batch?.color || "").trim();
+  const retailerIdValue = String(batch?.retailerName || "").trim();
+  const retailerLocationValue = String(batch?.retailerLocation || "").trim();
+  const imageValue = String(batch?.image || "").trim() || "/mob.jpg";
+  const manufacturerDateValue = String(batch?.manufacturerDate || "").trim();
 
-    if (!batchId) return res.status(400).json({ error: "Batch ID is required" });
-    if (!boxId) return res.status(400).json({ error: "Box ID is required" });
-    if (!startProductId) return res.status(400).json({ error: "Start Product ID is required" });
-    if (!productName) return res.status(400).json({ error: "Product name is required" });
-    if (!categoryValue) return res.status(400).json({ error: "Category is required" });
-    if (!manufacturerIdValue) return res.status(400).json({ error: "Manufacturer ID is required" });
-    if (!manufacturePlaceValue) return res.status(400).json({ error: "Manufacture place is required" });
-    if (!modelNumberValue) return res.status(400).json({ error: "Model number is required" });
-    if (!warrantyPeriodValue) return res.status(400).json({ error: "Warranty period is required" });
-    if (!colorValue) return res.status(400).json({ error: "Color is required" });
-    if (!retailerIdValue) return res.status(400).json({ error: "Retailer name is required" });
-    if (!retailerLocationValue) return res.status(400).json({ error: "Retailer location is required" });
+  if (!batchId) throw new Error("Batch ID is required");
+  if (!boxId) throw new Error("Box ID is required");
+  if (!startProductId) throw new Error("Start Product ID is required");
+  if (!productName) throw new Error("Product name is required");
+  if (!categoryValue) throw new Error("Category is required");
+  if (!manufacturerIdValue) throw new Error("Manufacturer ID is required");
+  if (!manufacturePlaceValue) throw new Error("Manufacture place is required");
+  if (!modelNumberValue) throw new Error("Model number is required");
+  if (!warrantyPeriodValue) throw new Error("Warranty period is required");
+  if (!colorValue) throw new Error("Color is required");
+  if (!retailerIdValue) throw new Error("Retailer name is required");
+  if (!retailerLocationValue) throw new Error("Retailer location is required");
 
-    const startNum = parseInt(
-      startProductId.replace(/\D/g, ""),
-      10
-    );
-    if (!Number.isFinite(startNum) || startNum <= 0) {
-      return res.status(400).json({
-        error: "Start Product ID must contain a positive number (example: P1001)"
-      });
-    }
-    const safeStartNum = startNum;
-    const batchSizeRaw = Number(batch.batchSize);
-    if (!Number.isInteger(batchSizeRaw) || batchSizeRaw <= 0) {
-      return res.status(400).json({
-        error: "Batch size is required and must be a positive integer"
-      });
-    }
-    const batchSize = batchSizeRaw;
+  const startNum = parseInt(startProductId.replace(/\D/g, ""), 10);
+  if (!Number.isFinite(startNum) || startNum <= 0) {
+    throw new Error("Start Product ID must contain a positive number (example: P1001)");
+  }
 
-    const price = Number(batch.price);
-    if (!Number.isFinite(price) || price <= 0) {
-      return res.status(400).json({
-        error: "Price is required and must be greater than 0"
-      });
-    }
+  const batchSizeRaw = Number(batch?.batchSize);
+  if (!Number.isInteger(batchSizeRaw) || batchSizeRaw <= 0) {
+    throw new Error("Batch size is required and must be a positive integer");
+  }
+  const batchSize = batchSizeRaw;
 
-    const parsedDate = batch.manufacturerDate ? new Date(batch.manufacturerDate) : null;
-    const mfgDate = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
-    if (!mfgDate) {
-      return res.status(400).json({
-        error: "Manufacturer date is required and must be valid"
-      });
-    }
+  const price = Number(batch?.price);
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new Error("Price is required and must be greater than 0");
+  }
 
-    const [existingBox, existingBoxSecret, existingPreparedBox] = await Promise.all([
+  const parsedDate = manufacturerDateValue ? new Date(manufacturerDateValue) : null;
+  const mfgDate = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
+  if (!mfgDate) {
+    throw new Error("Manufacturer date is required and must be valid");
+  }
+
+  return {
+    batchId,
+    boxId,
+    safeStartNum: startNum,
+    batchSize,
+    productName,
+    categoryValue,
+    manufacturerIdValue,
+    manufacturePlaceValue,
+    modelNumberValue,
+    warrantyPeriodValue,
+    colorValue,
+    retailerIdValue,
+    retailerLocationValue,
+    imageValue,
+    manufacturerDateValue,
+    mfgDate,
+    price
+  };
+}
+
+function buildBatchItemsFromPayload(normalized) {
+  const {
+    batchId,
+    boxId,
+    safeStartNum,
+    batchSize,
+    productName,
+    categoryValue,
+    manufacturerIdValue,
+    manufacturerDateValue,
+    manufacturePlaceValue,
+    modelNumberValue,
+    warrantyPeriodValue,
+    colorValue,
+    imageValue,
+    price
+  } = normalized;
+
+  const productIds = [];
+  const items = [];
+
+  for (let i = 0; i < batchSize; i += 1) {
+    const productId = `P${safeStartNum + i}`;
+    const serialNumber = `${batchId}-SN-${i + 1}`;
+    productIds.push(productId);
+    items.push({
+      productId,
+      boxId,
+      name: productName,
+      category: categoryValue,
+      manufacturer: manufacturerIdValue,
+      manufacturerDate: manufacturerDateValue,
+      manufacturePlace: manufacturePlaceValue,
+      modelNumber: modelNumberValue,
+      serialNumber,
+      warrantyPeriod: warrantyPeriodValue,
+      batchNumber: batchId,
+      color: colorValue,
+      specs: JSON.stringify({ batch: batchId }),
+      price,
+      image: imageValue
+    });
+  }
+
+  const uniqueProductIds = new Set(productIds);
+  if (uniqueProductIds.size !== productIds.length) {
+    throw new Error("Duplicate Product IDs in batch request");
+  }
+
+  return { productIds, items };
+}
+
+async function findBatchDbConflicts({ boxId, productIds }) {
+  const [existingBox, existingBoxSecret, existingPreparedBox, existingPrepared, existingProducts, existingSecrets] =
+    await Promise.all([
       prisma.box.findUnique({ where: { boxCode: boxId }, select: { boxCode: true } }),
       prisma.boxSecret.findUnique({ where: { boxId }, select: { boxId: true } }),
-      prisma.preparedProduct.findFirst({ where: { boxId }, select: { boxId: true } })
-    ]);
-    if (existingBox || existingBoxSecret || existingPreparedBox) {
-      return res.status(409).json({
-        error: `Box ID already exists: ${boxId}. Box ID must be unique.`
-      });
-    }
-
-    const productIds = [];
-    for (let i = 0; i < batchSize; i += 1) {
-      productIds.push(`P${safeStartNum + i}`);
-    }
-
-    const uniqueProductIds = new Set(productIds);
-    if (uniqueProductIds.size !== productIds.length) {
-      return res.status(400).json({ error: "Duplicate Product IDs in batch request" });
-    }
-
-    const [existingPrepared, existingProducts, existingSecrets] = await Promise.all([
+      prisma.preparedProduct.findFirst({ where: { boxId }, select: { boxId: true } }),
       prisma.preparedProduct.findMany({
         where: { productId: { in: productIds } },
         select: { productId: true }
@@ -323,166 +390,253 @@ app.post("/prepare-batch", authenticate, async (req, res) => {
       })
     ]);
 
-    const taken = new Set([
-      ...existingPrepared.map((x) => x.productId),
-      ...existingProducts.map((x) => x.productCode),
-      ...existingSecrets.map((x) => x.productId)
-    ]);
+  return {
+    existingBox,
+    existingBoxSecret,
+    existingPreparedBox,
+    existingPrepared,
+    existingProducts,
+    existingSecrets
+  };
+}
 
-    if (taken.size > 0) {
+function isFullyCommitted(conflicts, batchSize) {
+  const hasAllPerProduct =
+    conflicts.existingPrepared.length === batchSize &&
+    conflicts.existingProducts.length === batchSize &&
+    conflicts.existingSecrets.length === batchSize;
+  return Boolean(
+    hasAllPerProduct &&
+      conflicts.existingBox &&
+      conflicts.existingBoxSecret &&
+      conflicts.existingPreparedBox
+  );
+}
+
+function collectTakenProductIds(conflicts) {
+  return Array.from(
+    new Set([
+      ...conflicts.existingPrepared.map((x) => x.productId),
+      ...conflicts.existingProducts.map((x) => x.productCode),
+      ...conflicts.existingSecrets.map((x) => x.productId)
+    ])
+  ).sort();
+}
+
+function hasAnyDbConflict(conflicts) {
+  return Boolean(
+    conflicts.existingBox ||
+      conflicts.existingBoxSecret ||
+      conflicts.existingPreparedBox ||
+      conflicts.existingPrepared.length > 0 ||
+      conflicts.existingProducts.length > 0 ||
+      conflicts.existingSecrets.length > 0
+  );
+}
+
+async function assertProductsRegisteredOnChain({ batchId, boxId, items }) {
+  for (const item of items) {
+    const chainProduct = await readChainProduct(item.productId);
+    const exists = chainProduct?.productId && String(chainProduct.productId).trim().length > 0;
+    if (!exists) {
+      throw new Error(`Blockchain product not found for ${item.productId}`);
+    }
+    if (String(chainProduct.batchNumber || "").trim() !== batchId) {
+      throw new Error(`Blockchain batch mismatch for ${item.productId}`);
+    }
+    if (String(chainProduct.boxId || "").trim() !== boxId) {
+      throw new Error(`Blockchain box mismatch for ${item.productId}`);
+    }
+  }
+}
+
+app.post("/prepare-batch", authenticate, async (req, res) => {
+  try {
+    const normalized = normalizeBatchPayload(req.body);
+    const { productIds, items } = buildBatchItemsFromPayload(normalized);
+    const conflicts = await findBatchDbConflicts({
+      boxId: normalized.boxId,
+      productIds
+    });
+
+    if (hasAnyDbConflict(conflicts)) {
+      if (conflicts.existingBox || conflicts.existingBoxSecret || conflicts.existingPreparedBox) {
+        return res.status(409).json({
+          error: `Box ID already exists: ${normalized.boxId}. Box ID must be unique.`
+        });
+      }
+
+      const taken = collectTakenProductIds(conflicts);
       return res.status(409).json({
-        error: `Product IDs already exist: ${Array.from(taken).sort().join(", ")}`
+        error: `Product IDs already exist: ${taken.join(", ")}`
       });
     }
 
-    // Ensure manufacturer profile exists for relational Batch/Box/Product tables.
-    const manufacturer = await prisma.manufacturer.upsert({
-      where: { userId: req.user.userId },
-      update: {
-        name: manufacturerIdValue
-      },
-      create: {
-        userId: req.user.userId,
-        name: manufacturerIdValue
-      }
-    });
-
-    // Upsert summary-level Batch + Box rows.
-    const batchRow = await prisma.batch.upsert({
-      where: { batchCode: batchId },
-      update: {
-        manufacturerId: manufacturer.id,
-        boxCode: boxId,
-        totalBoxes: 1,
-        totalProducts: batchSize,
-        registered: true
-      },
-      create: {
-        batchCode: batchId,
-        boxCode: boxId,
-        manufacturerId: manufacturer.id,
-        totalBoxes: 1,
-        totalProducts: batchSize,
-        registered: true
-      }
-    });
-
-    const boxRow = await prisma.box.upsert({
-      where: { boxCode: boxId },
-      update: {
-        batchId: batchRow.id,
-        totalProducts: batchSize,
-        manufacturerId: manufacturerIdValue,
-        manufactureLocation: manufacturePlaceValue,
-        retailerId: retailerIdValue,
-        retailerLocation: retailerLocationValue,
-        registered: true
-      },
-      create: {
-        boxCode: boxId,
-        batchId: batchRow.id,
-        totalProducts: batchSize,
-        manufacturerId: manufacturerIdValue,
-        manufactureLocation: manufacturePlaceValue,
-        retailerId: retailerIdValue,
-        retailerLocation: retailerLocationValue,
-        registered: true
-      }
-    });
-
-    const batchSecret = crypto.randomBytes(32).toString("hex");
-    const boxSecret = hashValue(`${batchSecret}:${boxId}`);
-
-    await prisma.boxSecret.upsert({
-      where: { boxId },
-      update: { secret: boxSecret },
-      create: { boxId, secret: boxSecret }
-    });
-
-    const items = [];
-
-    for (let i = 0; i < batchSize; i++) {
-      const productId = productIds[i];
-      const serialNumber = `${batchId}-SN-${i + 1}`;
-
-      const productSecret = hashValue(`${productId}:${boxId}:${boxSecret}`);
-
-      // Store in DB. Use create to enforce uniqueness and block silent overwrite.
-      await prisma.productSecret.create({
-        data: { productId, secret: productSecret }
-      });
-
-      await prisma.preparedProduct.create({
-        data: {
-          productId,
-          batchId,
-          boxId,
-          serialNumber,
-          name: productName,
-          category: categoryValue,
-          manufacturer: manufacturerIdValue,
-          manufacturerDate: batch.manufacturerDate || "",
-          manufacturePlace: manufacturePlaceValue,
-          modelNumber: modelNumberValue,
-          warrantyPeriod: warrantyPeriodValue,
-          color: colorValue,
-          specs: JSON.stringify({ batch: batchId }),
-          price,
-          image: batch.image || "/mob.jpg",
-          retailerName: retailerIdValue,
-          retailerLocation: retailerLocationValue,
-          registered: true
-        }
-      });
-
-      // Store full product details in relational Product table.
-      await prisma.product.create({
-        data: {
-          productCode: productId,
-          batchId: batchRow.id,
-          boxId: boxRow.id,
-          name: productName,
-          brand: manufacturerIdValue || "TrustChain",
-          category: categoryValue,
-          modelNumber: modelNumberValue,
-          serialNumber,
-          warrantyPeriod: warrantyPeriodValue,
-          color: colorValue,
-          price,
-          image: batch.image || "/mob.jpg",
-          retailerId: retailerIdValue,
-          retailerLocation: retailerLocationValue,
-          mfgDate,
-          registered: true
-        }
-      });
-
-      items.push({
-        productId,
-        boxId,
-        name: productName,
-        category: categoryValue,
-        manufacturer: manufacturerIdValue,
-        manufacturerDate: batch.manufacturerDate,
-        manufacturePlace: manufacturePlaceValue,
-        modelNumber: modelNumberValue,
-        serialNumber,
-        warrantyPeriod: warrantyPeriodValue,
-        batchNumber: batchId,
-        color: colorValue,
-        specs: JSON.stringify({ batch: batchId }),
-        price,
-        image: batch.image || "/mob.jpg"
-      });
-    }
-
-    console.log("âœ… Batch prepared with secrets and details stored in DB");
-
+    console.log("Batch prepared for blockchain registration; DB write deferred");
     res.json({ items });
-
   } catch (err) {
-    console.error("âŒ Batch preparation failed:", err);
-    res.status(500).json({ error: err?.message || "Batch preparation failed" });
+    const message = err?.message || "Batch preparation failed";
+    const status =
+      message.includes("required") ||
+      message.includes("must be") ||
+      message.includes("Duplicate Product IDs")
+        ? 400
+        : 500;
+    console.error("Batch preparation failed:", err);
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post("/commit-batch", authenticate, async (req, res) => {
+  try {
+    const normalized = normalizeBatchPayload(req.body);
+    const { productIds, items } = buildBatchItemsFromPayload(normalized);
+    const conflicts = await findBatchDbConflicts({
+      boxId: normalized.boxId,
+      productIds
+    });
+
+    if (isFullyCommitted(conflicts, normalized.batchSize)) {
+      return res.json({ committed: true, alreadyCommitted: true, itemsCount: normalized.batchSize });
+    }
+
+    if (hasAnyDbConflict(conflicts)) {
+      const taken = collectTakenProductIds(conflicts);
+      const boxConflict =
+        conflicts.existingBox || conflicts.existingBoxSecret || conflicts.existingPreparedBox;
+      return res.status(409).json({
+        error: boxConflict
+          ? `Box ID already exists: ${normalized.boxId}.`
+          : `Product IDs already exist: ${taken.join(", ")}`
+      });
+    }
+
+    await assertProductsRegisteredOnChain({
+      batchId: normalized.batchId,
+      boxId: normalized.boxId,
+      items
+    });
+
+    await prisma.$transaction(async (tx) => {
+      const manufacturer = await tx.manufacturer.upsert({
+        where: { userId: req.user.userId },
+        update: { name: normalized.manufacturerIdValue },
+        create: { userId: req.user.userId, name: normalized.manufacturerIdValue }
+      });
+
+      const batchRow = await tx.batch.upsert({
+        where: { batchCode: normalized.batchId },
+        update: {
+          manufacturerId: manufacturer.id,
+          boxCode: normalized.boxId,
+          totalBoxes: 1,
+          totalProducts: normalized.batchSize,
+          registered: true
+        },
+        create: {
+          batchCode: normalized.batchId,
+          boxCode: normalized.boxId,
+          manufacturerId: manufacturer.id,
+          totalBoxes: 1,
+          totalProducts: normalized.batchSize,
+          registered: true
+        }
+      });
+
+      const boxRow = await tx.box.upsert({
+        where: { boxCode: normalized.boxId },
+        update: {
+          batchId: batchRow.id,
+          totalProducts: normalized.batchSize,
+          manufacturerId: normalized.manufacturerIdValue,
+          manufactureLocation: normalized.manufacturePlaceValue,
+          retailerId: normalized.retailerIdValue,
+          retailerLocation: normalized.retailerLocationValue,
+          registered: true
+        },
+        create: {
+          boxCode: normalized.boxId,
+          batchId: batchRow.id,
+          totalProducts: normalized.batchSize,
+          manufacturerId: normalized.manufacturerIdValue,
+          manufactureLocation: normalized.manufacturePlaceValue,
+          retailerId: normalized.retailerIdValue,
+          retailerLocation: normalized.retailerLocationValue,
+          registered: true
+        }
+      });
+
+      const batchSecret = crypto.randomBytes(32).toString("hex");
+      const boxSecret = hashValue(`${batchSecret}:${normalized.boxId}`);
+      await tx.boxSecret.upsert({
+        where: { boxId: normalized.boxId },
+        update: { secret: boxSecret },
+        create: { boxId: normalized.boxId, secret: boxSecret }
+      });
+
+      for (const item of items) {
+        const productSecret = hashValue(`${item.productId}:${normalized.boxId}:${boxSecret}`);
+        await tx.productSecret.create({
+          data: { productId: item.productId, secret: productSecret }
+        });
+
+        await tx.preparedProduct.create({
+          data: {
+            productId: item.productId,
+            batchId: normalized.batchId,
+            boxId: normalized.boxId,
+            serialNumber: item.serialNumber,
+            name: normalized.productName,
+            category: normalized.categoryValue,
+            manufacturer: normalized.manufacturerIdValue,
+            manufacturerDate: normalized.manufacturerDateValue,
+            manufacturePlace: normalized.manufacturePlaceValue,
+            modelNumber: normalized.modelNumberValue,
+            warrantyPeriod: normalized.warrantyPeriodValue,
+            color: normalized.colorValue,
+            specs: item.specs,
+            price: normalized.price,
+            image: normalized.imageValue,
+            retailerName: normalized.retailerIdValue,
+            retailerLocation: normalized.retailerLocationValue,
+            registered: true
+          }
+        });
+
+        await tx.product.create({
+          data: {
+            productCode: item.productId,
+            batchId: batchRow.id,
+            boxId: boxRow.id,
+            name: normalized.productName,
+            brand: normalized.manufacturerIdValue || "TrustChain",
+            category: normalized.categoryValue,
+            modelNumber: normalized.modelNumberValue,
+            serialNumber: item.serialNumber,
+            warrantyPeriod: normalized.warrantyPeriodValue,
+            color: normalized.colorValue,
+            price: normalized.price,
+            image: normalized.imageValue,
+            retailerId: normalized.retailerIdValue,
+            retailerLocation: normalized.retailerLocationValue,
+            mfgDate: normalized.mfgDate,
+            registered: true
+          }
+        });
+      }
+    });
+
+    res.json({ committed: true, itemsCount: items.length });
+  } catch (err) {
+    const message = err?.message || "Batch commit failed";
+    const status =
+      message.includes("required") ||
+      message.includes("must be") ||
+      message.includes("Blockchain")
+        ? 400
+        : 500;
+    console.error("Batch commit failed:", err);
+    res.status(status).json({ error: message });
   }
 });
 
@@ -627,7 +781,7 @@ app.get("/product-details/:productId", authenticate, async (req, res) => {
     // Auto-heal DB status from blockchain to prevent stale sold/verified/shipped flags.
     let chainFlags = null;
     try {
-      const chainProduct = await contract.getProduct(productId);
+      const chainProduct = await readChainProduct(productId);
       if (chainProduct?.productId) {
         chainFlags = {
           shipped: Boolean(chainProduct.shipped),
@@ -1430,7 +1584,7 @@ app.post("/verify", async (req, res) => {
       return res.json({ status: "FAKE" });
     }
 
-    const product = await contract.getProduct(productId);
+    const product = await readChainProduct(productId);
 
     res.json({
       status: "GENUINE",
@@ -1462,4 +1616,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Backend running on port ${PORT}`);
 });
+
 

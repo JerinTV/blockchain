@@ -70,30 +70,15 @@ const Home = () => {
             return;
           }
 
-          if (entry.target.classList.contains("contact-v2-panel")) {
-            // Reveal once and keep visible to avoid "contact not loading" issues.
-            if (entry.isIntersecting) {
-              entry.target.classList.add("in-view");
-              observer.unobserve(entry.target);
-            }
-          }
         });
       },
       { threshold: 0.1, rootMargin: "0px 0px -8% 0px" }
     );
 
-    const observedElements = document.querySelectorAll(".feature-card, .contact-v2-panel");
+    const observedElements = document.querySelectorAll(".feature-card");
     observedElements.forEach(card => observer.observe(card));
 
-    // Fallback: ensure contact panels are visible even if intersection events fail.
-    const contactFallbackTimer = window.setTimeout(() => {
-      document.querySelectorAll(".contact-v2-panel").forEach(panel => {
-        panel.classList.add("in-view");
-      });
-    }, 900);
-
     return () => {
-      window.clearTimeout(contactFallbackTimer);
       observer.disconnect();
     };
   }, []);
@@ -102,7 +87,8 @@ const Home = () => {
   // JSX
   // ==================================================
   return (
-    <div className="home-page">
+    <div className="home-page ultra-home premium-v2">
+      <div className="ultra-grid" aria-hidden="true"></div>
 
       {/* ================= NAVBAR ================= */}
       <nav className="navbar">
@@ -127,14 +113,21 @@ const Home = () => {
 
       {/* ================= HOME ================= */}
       <section id="home" className="container home-section">
-
-        <img src="/bc1.png" alt="Blockchain Logo" className="logo" />
-
         <div className="heading-section">
-          <h1>
-            <span className="line1">BLOCKCHAIN BASED</span><br />
-            <span className="line2">PRODUCT SECURITY</span>
-          </h1>
+          <div className="hero-ambient" aria-hidden="true">
+            <span className="hero-ambient-orb orb-a"></span>
+            <span className="hero-ambient-orb orb-b"></span>
+            <span className="hero-ambient-line"></span>
+          </div>
+
+          <p className="hero-eyebrow">Enterprise Product Security Layer</p>
+          <div className="hero-title-row">
+            <img src="/bc1.png" alt="" className="hero-title-logo" aria-hidden="true" />
+            <h1>
+              <span className="line1">BLOCKCHAIN BASED</span>
+              <span className="line2">PRODUCT SECURITY</span>
+            </h1>
+          </div>
 
           <div className="motto-row">
             <p className="motto">
@@ -155,16 +148,27 @@ const Home = () => {
               </span>
             </div>
           </div>
+          <p className="hero-subcopy">
+            Premium-grade verification architecture for modern supply chains, designed for trust at scale.
+          </p>
 
           <section className="home-premium-cta">
             <div className="home-premium-cta-shell">
               <p>Ready to secure your supply chain?</p>
-              <button
-                className="btn-primary"
-                onClick={() => navigate("/roles")}
-              >
-                Get Started
-              </button>
+              <div className="hero-cta-row">
+                <button
+                  className="btn-primary"
+                  onClick={() => navigate("/roles")}
+                >
+                  Get Started
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => scrollTo("features")}
+                >
+                  Explore Features
+                </button>
+              </div>
             </div>
           </section>
 
@@ -180,10 +184,22 @@ const Home = () => {
         </div>
 
         <div className="about-premium-grid">
-          <article className="about-premium-card about-word-chip trust">Secure Records</article>
-          <article className="about-premium-card about-word-chip transparency">Instant Verify</article>
-          <article className="about-premium-card about-word-chip innovation">Full Tracking</article>
-          <article className="about-premium-card about-word-chip assurance">Counterfeit Free</article>
+          <article className="about-premium-card about-word-chip trust">
+            <span className="about-card-key">01</span>
+            <span>Secure Records</span>
+          </article>
+          <article className="about-premium-card about-word-chip transparency">
+            <span className="about-card-key">02</span>
+            <span>Instant Verify</span>
+          </article>
+          <article className="about-premium-card about-word-chip innovation">
+            <span className="about-card-key">03</span>
+            <span>Full Tracking</span>
+          </article>
+          <article className="about-premium-card about-word-chip assurance">
+            <span className="about-card-key">04</span>
+            <span>Counterfeit Free</span>
+          </article>
         </div>
       </section>
 
@@ -347,7 +363,7 @@ const Home = () => {
                 {/* ================= CONTACT ================= */}
       <section id="contact" className="contact-v2-section contact-v2-premium">
         <div className="contact-v2-shell">
-          <div className="contact-v2-left contact-v2-panel contact-v2-from-left">
+          <div className="contact-v2-left contact-v2-panel contact-v2-from-left in-view">
             <p className="contact-v2-kicker">CONNECT WITH TRUSTCHAIN</p>
             <h2>Let&apos;s Secure Your Product Journey</h2>
             <p className="contact-v2-desc">
@@ -386,7 +402,7 @@ const Home = () => {
             </div>
           </div>
 
-          <div className="contact-v2-right contact-v2-panel contact-v2-from-right">
+          <div className="contact-v2-right contact-v2-panel contact-v2-from-right in-view">
             <form className="contact-v2-form">
               <div className="contact-v2-input">
                 <User size={16} />

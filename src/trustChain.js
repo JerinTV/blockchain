@@ -157,7 +157,7 @@ export const registerBatch = async (batch) => {
   }
 
   if (!res.ok) {
-    const backendMsg = payload?.error || "Failed to prepare batch on backend";
+    const backendMsg = payload?.error || "Failed to prepare batch";
     throw new Error(backendMsg);
   }
 
@@ -178,7 +178,7 @@ export const registerBatch = async (batch) => {
     price: item?.price ?? 0,
     image: item?.image ?? ""
   }));
-  console.log("Backend prepared secrets and returned items");
+  console.log("Backend prepared batch items for chain registration");
 
   // 3) Register same products on blockchain in one transaction.
   let chainRegistered = false;
@@ -234,7 +234,24 @@ export const registerBatch = async (batch) => {
 
   if (!chainRegistered) {
     throw new Error(
-      `Batch saved to backend DB, but blockchain transaction failed: ${lastReason}`
+      `Blockchain transaction failed: ${lastReason}. Backend was not updated.`
+    );
+  }
+
+  // 4) Persist batch in DB only after blockchain confirmation.
+  const commitRes = await fetch("https://blockchain-li7r.onrender.com/commit-batch", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payloadBatch)
+  });
+  const commitPayload = await commitRes.json().catch(() => ({}));
+  if (!commitRes.ok) {
+    throw new Error(
+      commitPayload?.error ||
+        "Blockchain tx succeeded, but backend commit failed. Please retry commit."
     );
   }
 
