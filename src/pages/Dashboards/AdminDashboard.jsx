@@ -149,8 +149,8 @@ function MiniAreaChart({ points = [] }) {
 
       {coords.map((c) => (
         <g key={`${c.label}-${c.val}`}>
-          <circle cx={c.x} cy={c.y} r="6.5" fill="rgba(56,189,248,.22)" />
-          <circle cx={c.x} cy={c.y} r="3.4" fill="#e0f2fe" stroke="#38bdf8" strokeWidth="1.2" />
+          <circle cx={c.x} cy={c.y} r="6.5" fill="rgba(37,99,235,.24)" />
+          <circle cx={c.x} cy={c.y} r="3.4" fill="#38bdf8" stroke="#1d4ed8" strokeWidth="1.2" />
         </g>
       ))}
 

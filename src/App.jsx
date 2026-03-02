@@ -12,8 +12,10 @@ import BlockchainData from "./pages/BlockchainData";
 
 
 export default function App() {
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+
   useEffect(() => {
-    fetch("https://blockchain-li7r.onrender.com/api/auth").catch(() => {});
+    fetch(`${API_BASE}/health`).catch(() => {});
   }, []);
 
   return (

@@ -115,9 +115,8 @@ const Home = () => {
       <section id="home" className="container home-section">
         <div className="heading-section">
           <div className="hero-ambient" aria-hidden="true">
-            <span className="hero-ambient-orb orb-a"></span>
-            <span className="hero-ambient-orb orb-b"></span>
             <span className="hero-ambient-line"></span>
+            <span className="hero-ambient-line line-b"></span>
           </div>
 
           <p className="hero-eyebrow">Enterprise Product Security Layer</p>

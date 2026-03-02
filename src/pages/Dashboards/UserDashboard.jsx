@@ -18,7 +18,7 @@ import {
   FaMoneyBillWave,
   FaCheckDouble
 } from "react-icons/fa";
-import { getProductDetails } from "../../trustChain";
+import { getProduct } from "../../trustChain";
 import BackButton from "../../components/BackButton";
 import "../../dash.css";
 
@@ -48,9 +48,17 @@ export default function UserDashboard() {
       setStatusTone("info");
       setProduct(null);
 
-      const result = await getProductDetails(searchProductId);
-      setProduct(result);
-      setStatus("Product details loaded from TrustChain records.");
+      const result = await getProduct(searchProductId);
+      if (!result?.productId) {
+        throw new Error("Product not found");
+      }
+      setProduct({
+        ...result,
+        batchId: result.batchNumber || "",
+        retailerId: "-",
+        retailerLocation: "-"
+      });
+      setStatus("Product details loaded directly from blockchain (MetaMask).");
       setStatusTone("success");
     } catch {
       setStatus("Product not found.");

@@ -25,8 +25,8 @@ body{
 
 .home-page {
   background:
-    radial-gradient(circle at 15% 12%, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0) 38%),
-    radial-gradient(circle at 88% 22%, rgba(125,211,252,0.4) 0%, rgba(125,211,252,0) 42%),
+    linear-gradient(100deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0) 46%),
+    linear-gradient(260deg, rgba(125,211,252,0.16) 0%, rgba(125,211,252,0) 44%),
     linear-gradient(165deg, #2497cf 0%, #66b8dd 35%, #4caedf 68%, #5cb4e9 100%);
 }
 
@@ -3599,8 +3599,8 @@ body{
   --pv2-accent-2: #2f7dff;
   --pv2-border: rgba(120, 165, 214, 0.26);
   background:
-    radial-gradient(1200px 600px at 12% -10%, rgba(72, 182, 255, 0.14), transparent 56%),
-    radial-gradient(1000px 600px at 100% 0%, rgba(47, 125, 255, 0.14), transparent 58%),
+    linear-gradient(115deg, rgba(72, 182, 255, 0.12) 0%, rgba(72, 182, 255, 0) 45%),
+    linear-gradient(250deg, rgba(47, 125, 255, 0.12) 0%, rgba(47, 125, 255, 0) 48%),
     linear-gradient(170deg, var(--pv2-bg) 0%, var(--pv2-bg-2) 56%, #0d1c2f 100%);
   color: var(--pv2-text);
 }
@@ -4208,41 +4208,24 @@ body{
   height: 320px;
   pointer-events: none;
   z-index: -1;
-}
-
-.premium-v2 #home .hero-ambient-orb {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(8px);
-  opacity: 0.62;
-}
-
-.premium-v2 #home .hero-ambient-orb.orb-a {
-  width: 320px;
-  height: 320px;
-  left: -40px;
-  top: -30px;
-  background: radial-gradient(circle at center, rgba(100, 196, 255, 0.32) 0%, rgba(100, 196, 255, 0) 72%);
-  animation: heroOrbFloatA 8s ease-in-out infinite;
-}
-
-.premium-v2 #home .hero-ambient-orb.orb-b {
-  width: 360px;
-  height: 360px;
-  right: 140px;
-  top: 20px;
-  background: radial-gradient(circle at center, rgba(82, 137, 255, 0.22) 0%, rgba(82, 137, 255, 0) 72%);
-  animation: heroOrbFloatB 10s ease-in-out infinite;
+  opacity: 0.85;
 }
 
 .premium-v2 #home .hero-ambient-line {
   position: absolute;
   left: 12%;
   right: 8%;
-  top: 168px;
+  top: 160px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(161, 214, 255, 0.55), transparent);
-  opacity: 0.8;
+  background: linear-gradient(90deg, transparent, rgba(123, 194, 255, 0.75), transparent);
+  opacity: 0.9;
+}
+
+.premium-v2 #home .hero-ambient-line.line-b {
+  top: 190px;
+  left: 24%;
+  right: 20%;
+  opacity: 0.55;
 }
 
 .premium-v2 #home .hero-eyebrow {
@@ -4488,12 +4471,3 @@ body{
   }
 }
 
-@keyframes heroOrbFloatA {
-  0%, 100% { transform: translate3d(0, 0, 0); }
-  50% { transform: translate3d(16px, -12px, 0); }
-}
-
-@keyframes heroOrbFloatB {
-  0%, 100% { transform: translate3d(0, 0, 0); }
-  50% { transform: translate3d(-18px, 14px, 0); }
-}

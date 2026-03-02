@@ -4,12 +4,39 @@ import TrustChainAbi from "./TrustChainAbi.json";
 /* ================= CONFIG ================= */
 
 const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
+const EXPECTED_CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID || 31337); // Hardhat local by default.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+
+const toHexChainId = (id) => `0x${Number(id).toString(16)}`;
 
 /* ================= PROVIDER ================= */
 
 const getProvider = () => {
   if (!window.ethereum) throw new Error("MetaMask not found");
   return new ethers.BrowserProvider(window.ethereum);
+};
+
+const ensureWalletOnExpectedNetwork = async () => {
+  const provider = getProvider();
+  const network = await provider.getNetwork();
+  const current = Number(network.chainId);
+
+  if (current === EXPECTED_CHAIN_ID) return provider;
+
+  const expectedHex = toHexChainId(EXPECTED_CHAIN_ID);
+  try {
+    await window.ethereum.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: expectedHex }]
+    });
+  } catch (err) {
+    const reason = extractErrorReason(err);
+    throw new Error(
+      `Wrong MetaMask network. Please switch to chainId ${EXPECTED_CHAIN_ID} and retry. ${reason}`
+    );
+  }
+
+  return getProvider();
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -21,6 +48,21 @@ const extractErrorReason = (err) =>
   err?.error?.message ||
   err?.message ||
   "Unknown blockchain error";
+
+const clearAuthSession = () => {
+  localStorage.removeItem("token");
+  localStorage.removeItem("role");
+  localStorage.removeItem("authEmail");
+  localStorage.removeItem("manufacturerId");
+};
+
+const throwIfUnauthorized = (res, data, fallback) => {
+  if (res.status === 401) {
+    clearAuthSession();
+    throw new Error("Session expired or invalid token. Please login again.");
+  }
+  throw new Error(data?.error || fallback);
+};
 
 const isNonceConflictError = (reason) => {
   const msg = String(reason || "").toLowerCase();
@@ -38,7 +80,13 @@ const getContract = async () => {
   if (!window.ethereum) throw new Error("MetaMask not found");
   await window.ethereum.request({ method: "eth_requestAccounts" });
 
-  const provider = getProvider();
+  const provider = await ensureWalletOnExpectedNetwork();
+  const code = await provider.getCode(CONTRACT_ADDRESS);
+  if (!code || code === "0x") {
+    throw new Error(
+      `No contract found at ${CONTRACT_ADDRESS} on chainId ${EXPECTED_CHAIN_ID}. Check VITE_CONTRACT_ADDRESS and MetaMask network.`
+    );
+  }
   const signer = await provider.getSigner();
 
   return new ethers.Contract(CONTRACT_ADDRESS, TrustChainAbi, signer);
@@ -140,7 +188,7 @@ export const registerBatch = async (batch) => {
   };
 
   // 2) Save/generate batch product data in backend DB.
-  const res = await fetch("https://blockchain-li7r.onrender.com/prepare-batch", {
+  const res = await fetch(`${API_BASE}/prepare-batch`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -157,8 +205,7 @@ export const registerBatch = async (batch) => {
   }
 
   if (!res.ok) {
-    const backendMsg = payload?.error || "Failed to prepare batch";
-    throw new Error(backendMsg);
+    throwIfUnauthorized(res, payload, "Failed to prepare batch");
   }
 
   const items = (payload?.items || []).map((item) => ({
@@ -239,7 +286,7 @@ export const registerBatch = async (batch) => {
   }
 
   // 4) Persist batch in DB only after blockchain confirmation.
-  const commitRes = await fetch("https://blockchain-li7r.onrender.com/commit-batch", {
+  const commitRes = await fetch(`${API_BASE}/commit-batch`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -249,9 +296,10 @@ export const registerBatch = async (batch) => {
   });
   const commitPayload = await commitRes.json().catch(() => ({}));
   if (!commitRes.ok) {
-    throw new Error(
-      commitPayload?.error ||
-        "Blockchain tx succeeded, but backend commit failed. Please retry commit."
+    throwIfUnauthorized(
+      commitRes,
+      commitPayload,
+      "Blockchain tx succeeded, but backend commit failed. Please retry commit."
     );
   }
 
@@ -266,7 +314,7 @@ const markBoxShippedInBackend = async (boxId) => {
     throw new Error("Box shipped on blockchain, but backend sync failed: login token missing.");
   }
 
-  const res = await fetch("https://blockchain-li7r.onrender.com/mark-box-shipped", {
+  const res = await fetch(`${API_BASE}/mark-box-shipped`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -373,7 +421,7 @@ export const verifyBox = async (boxId) => {
   if (alreadyVerified) {
     // Keep backend status synced if it missed a prior update.
     if (token) {
-      const res = await fetch("https://blockchain-li7r.onrender.com/mark-box-verified", {
+      const res = await fetch(`${API_BASE}/mark-box-verified`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -420,7 +468,7 @@ export const verifyBox = async (boxId) => {
 
   let backendSynced = false;
   if (token) {
-    const res = await fetch("https://blockchain-li7r.onrender.com/mark-box-verified", {
+    const res = await fetch(`${API_BASE}/mark-box-verified`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -476,7 +524,7 @@ export const markProductSoldInBackend = async ({ productId, buyerEmail, txHash }
   if (!safeProductId) throw new Error("Product ID is required.");
   if (!safeBuyerEmail) throw new Error("Buyer email is required.");
 
-  const res = await fetch("https://blockchain-li7r.onrender.com/mark-product-sold", {
+  const res = await fetch(`${API_BASE}/mark-product-sold`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -589,18 +637,21 @@ export const getRecentHistory = async (manufacturerId) => {
   const params = new URLSearchParams();
   if (manufacturerId) params.set("manufacturerId", manufacturerId);
 
-  const res = await fetch(`https://blockchain-li7r.onrender.com/recent-history?${params.toString()}`, {
+  const res = await fetch(`${API_BASE}/recent-history?${params.toString()}`, {
     headers: {
       Authorization: `Bearer ${token}`
     }
   });
-  if (!res.ok) throw new Error("Failed to load recent history");
-  return res.json();
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throwIfUnauthorized(res, data, "Failed to load recent history");
+  }
+  return data;
 };
 
 export const getBoxDetails = async (boxId) => {
   const token = localStorage.getItem("token");
-  const res = await fetch(`https://blockchain-li7r.onrender.com/box-details/${boxId}`, {
+  const res = await fetch(`${API_BASE}/box-details/${boxId}`, {
     headers: {
       Authorization: `Bearer ${token}`
     }
@@ -614,7 +665,7 @@ export const getBoxDetails = async (boxId) => {
 
 export const getProductDetails = async (productId) => {
   const token = localStorage.getItem("token");
-  const res = await fetch(`https://blockchain-li7r.onrender.com/product-details/${productId}`, {
+  const res = await fetch(`${API_BASE}/product-details/${productId}`, {
     headers: {
       Authorization: `Bearer ${token}`
     }
