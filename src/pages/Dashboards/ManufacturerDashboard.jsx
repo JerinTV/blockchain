@@ -8,7 +8,7 @@ import {
 } from "../../trustChain";
 import "../../index2.css";
 import "../../manufacturer.css";
-import { fetchManufacturerDashboardSummary } from "../../services/api";
+import { fetchManufacturerDashboardSummary, fetchProductDetail } from "../../services/api";
 
 const defaultBatch = {
   batchId: "BATCH-567",
@@ -78,6 +78,7 @@ const ManufacturerDashboard = () => {
   const [searchProductId, setSearchProductId] = useState("");
   const [fetchedProduct, setFetchedProduct] = useState(null);
   const [fetchError, setFetchError] = useState("");
+  const [dbProductDetail, setDbProductDetail] = useState(null);
 
   const formatNumber = (value) =>
     new Intl.NumberFormat("en-IN").format(Number(value || 0));
@@ -130,6 +131,16 @@ const ManufacturerDashboard = () => {
   const shippedRate = totalProducts ? Math.min(100, (shippedProducts / totalProducts) * 100) : 0;
   const verifiedRate = totalProducts ? Math.min(100, (verifiedProducts / totalProducts) * 100) : 0;
   const soldRate = totalProducts ? Math.min(100, (soldProducts / totalProducts) * 100) : 0;
+  const qualityYield = shippedProducts ? Math.min(100, (verifiedProducts / shippedProducts) * 100) : 0;
+  const sellThrough = shippedProducts ? Math.min(100, (soldProducts / shippedProducts) * 100) : 0;
+  const throughputScore =
+    totalProducts && shippedProducts
+      ? Math.min(100, ((shippedProducts + verifiedProducts + soldProducts) / (totalProducts * 3)) * 100)
+      : 0;
+  const averageBoxSize = totalBoxes ? Math.round(totalProducts / totalBoxes) : 0;
+  const backlogRate = totalProducts ? Math.min(100, (pendingProducts / totalProducts) * 100) : 0;
+  const recentMaxProducts =
+    recentBoxes.length > 0 ? Math.max(...recentBoxes.map((box) => box._count?.products || 0), averageBoxSize || 1) : 1;
 
   const lastRegisteredText = useMemo(() => {
     if (!registerHistory.length) return "";
@@ -229,6 +240,13 @@ const ManufacturerDashboard = () => {
       setFetchError("");
       const p = await getProduct(searchProductId);
       setFetchedProduct(p);
+      try {
+        const detail = await fetchProductDetail(searchProductId);
+        setDbProductDetail(detail?.product || null);
+      } catch (err) {
+        console.error("Product detail fetch failed:", err);
+        setDbProductDetail(null);
+      }
       setStatus("");
     } catch {
       setFetchedProduct(null);
@@ -535,6 +553,34 @@ const ManufacturerDashboard = () => {
                   </div>
                 </div>
 
+                <div className="manufacturer-analytics-insights">
+                  <article className="manufacturer-insight-card">
+                    <span>Quality yield</span>
+                    <strong>{qualityYield.toFixed(1)}%</strong>
+                    <small>Verified / shipped</small>
+                  </article>
+                  <article className="manufacturer-insight-card">
+                    <span>Sell-through</span>
+                    <strong>{sellThrough.toFixed(1)}%</strong>
+                    <small>Sold / shipped</small>
+                  </article>
+                  <article className="manufacturer-insight-card">
+                    <span>Throughput score</span>
+                    <strong>{throughputScore.toFixed(1)}%</strong>
+                    <small>Goal: move product fast</small>
+                  </article>
+                  <article className="manufacturer-insight-card">
+                    <span>Average box size</span>
+                    <strong>{formatNumber(averageBoxSize)}</strong>
+                    <small>Products per box</small>
+                  </article>
+                  <article className="manufacturer-insight-card">
+                    <span>Pending backlog</span>
+                    <strong>{formatNumber(pendingProducts)}</strong>
+                    <small>{backlogRate.toFixed(1)}% pending</small>
+                  </article>
+                </div>
+
                 <div className="manufacturer-analytics-progress">
                   <div className="manufacturer-analytics-progress-row">
                     <div>
@@ -568,6 +614,32 @@ const ManufacturerDashboard = () => {
                     <div className="manufacturer-analytics-progress-track">
                       <i style={{ width: `${soldRate}%` }} />
                     </div>
+                  </div>
+                </div>
+
+                <div className="manufacturer-analytics-trend">
+                  <h4>Recent box volume</h4>
+                  <div className="manufacturer-analytics-trend-bars">
+                    {recentBoxes.length === 0 && <p className="products-loading">Waiting for boxes to sync...</p>}
+                    {recentBoxes.map((box) => {
+                      const productCount = box._count?.products || 0;
+                      const widthPercent = Math.max(
+                        8,
+                        Math.round((productCount / (recentMaxProducts || 1)) * 100)
+                      );
+                      return (
+                        <div key={`${box.boxId}-${box.createdAt}`} className="manufacturer-analytics-trend-bar">
+                          <div className="manufacturer-analytics-trend-row">
+                            <span>{box.boxId}</span>
+                            <span>{formatDate(box.createdAt)}</span>
+                          </div>
+                          <div className="manufacturer-analytics-trend-track">
+                            <i style={{ width: `${widthPercent}%` }} />
+                          </div>
+                          <small>{formatNumber(productCount)} products</small>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -637,12 +709,21 @@ const ManufacturerDashboard = () => {
                       <div><strong>Warranty:</strong> {fetchedProduct.warrantyPeriod || "-"}</div>
                       <div><strong>Price:</strong> {fetchedProduct.price || "-"}</div>
                     </div>
-                    <div className="manufacturer-status-row">
-                      <span className={`status-banner ${fetchedProduct.shipped ? "status-success" : "status-warning"}`}>Shipped: {fetchedProduct.shipped ? "Yes" : "No"}</span>
-                      <span className={`status-banner ${fetchedProduct.verifiedByRetailer ? "status-success" : "status-warning"}`}>Verified: {fetchedProduct.verifiedByRetailer ? "Yes" : "No"}</span>
-                      <span className={`status-banner ${fetchedProduct.sold ? "status-error" : "status-info"}`}>Sold: {fetchedProduct.sold ? "Yes" : "No"}</span>
-                    </div>
+                  <div className="manufacturer-status-row">
+                    <span className={`status-banner ${fetchedProduct.shipped ? "status-success" : "status-warning"}`}>Shipped: {fetchedProduct.shipped ? "Yes" : "No"}</span>
+                    <span className={`status-banner ${fetchedProduct.verifiedByRetailer ? "status-success" : "status-warning"}`}>Verified: {fetchedProduct.verifiedByRetailer ? "Yes" : "No"}</span>
+                    <span className={`status-banner ${fetchedProduct.sold ? "status-error" : "status-info"}`}>Sold: {fetchedProduct.sold ? "Yes" : "No"}</span>
                   </div>
+                  {dbProductDetail && (
+                    <div className="manufacturer-product-meta">
+                      <div><strong>Retailer:</strong> {dbProductDetail.box?.retailer?.username || dbProductDetail.box?.retailerEmail || "–"}</div>
+                      <div><strong>Retailer email:</strong> {dbProductDetail.box?.retailer?.email || dbProductDetail.box?.retailerEmail || "–"}</div>
+                      <div><strong>Shipping address:</strong> {dbProductDetail.box?.shippingAddress || "TBD"}</div>
+                      <div><strong>Sold to:</strong> {dbProductDetail.soldToEmail || "Not sold yet"}</div>
+                      <div><strong>Sold at:</strong> {formatDate(dbProductDetail.soldAt)}</div>
+                    </div>
+                  )}
+                </div>
                 </div>
               )}
             </div>

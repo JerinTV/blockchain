@@ -76,6 +76,8 @@ model Product {
   shipped        Boolean                @default(false)
   verified       Boolean                @default(false)
   sold           Boolean                @default(false)
+  soldToEmail    String?
+  soldAt         DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

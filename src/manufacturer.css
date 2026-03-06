@@ -191,6 +191,20 @@
   color: #f4f9ff;
 }
 
+.manufacturer-product-meta {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+  font-size: 0.85rem;
+  color: #cddbf2;
+}
+
+.manufacturer-product-meta strong {
+  color: #f4f9ff;
+  font-weight: 600;
+}
+
 .manufacturer-status-row {
   margin-top: 12px;
   display: flex;
@@ -305,6 +319,38 @@
   font-size: 0.75rem;
 }
 
+.manufacturer-analytics-insights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.manufacturer-insight-card {
+  border-radius: 12px;
+  border: 1px solid rgba(148, 197, 253, 0.25);
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(9, 20, 42, 0.95), rgba(6, 11, 29, 0.8));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.manufacturer-insight-card span {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.manufacturer-insight-card strong {
+  font-size: 1.4rem;
+  color: #fff;
+}
+
+.manufacturer-insight-card small {
+  color: #a7c0e3;
+  font-size: 0.75rem;
+}
+
 .manufacturer-analytics-progress-track {
   width: 100%;
   height: 10px;
@@ -317,6 +363,56 @@
   display: block;
   height: 100%;
   background: linear-gradient(100deg, #38bdf8, #0ea5e9);
+}
+
+.manufacturer-analytics-trend {
+  margin: 20px 0;
+}
+
+.manufacturer-analytics-trend h4 {
+  margin-bottom: 12px;
+  font-size: 1rem;
+  color: #f0f5ff;
+}
+
+.manufacturer-analytics-trend-bars {
+  display: grid;
+  gap: 10px;
+}
+
+.manufacturer-analytics-trend-bar {
+  border-radius: 12px;
+  border: 1px solid rgba(148, 197, 253, 0.18);
+  padding: 10px;
+  background: rgba(8, 15, 32, 0.85);
+}
+
+.manufacturer-analytics-trend-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: #9ec0e5;
+  margin-bottom: 6px;
+}
+
+.manufacturer-analytics-trend-track {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.2);
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.manufacturer-analytics-trend-track i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #2563eb);
+}
+
+.manufacturer-analytics-trend small {
+  color: #cbd5f5;
+  font-size: 0.7rem;
 }
 
 .manufacturer-analytics-recent {

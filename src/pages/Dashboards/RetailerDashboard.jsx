@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   connectBlockchain,
   getProduct,
@@ -9,7 +9,7 @@ import {
 import BackButton from "../../components/BackButton";
 import "../../index2.css";
 import "../../retailer.css";
-import { fetchBoxRetailerAssignment } from "../../services/api";
+import { fetchBoxRetailerAssignment, fetchRetailerShipments } from "../../services/api";
 
 const RetailerDashboard = () => {
   const [walletConnected, setWalletConnected] = useState(false);
@@ -20,6 +20,12 @@ const RetailerDashboard = () => {
   const [boxId, setBoxId] = useState("");
   const [boxProducts, setBoxProducts] = useState([]);
   const [isVerifyingBox, setIsVerifyingBox] = useState(false);
+  const [boxAnalyticsHistory, setBoxAnalyticsHistory] = useState([]);
+  const [saleBuyerEmail, setSaleBuyerEmail] = useState("");
+  const [isMarkingSold, setIsMarkingSold] = useState(false);
+  const [retailerShipments, setRetailerShipments] = useState([]);
+  const [shipmentsLoading, setShipmentsLoading] = useState(false);
+  const [shipmentsSummary, setShipmentsSummary] = useState(null);
 
   const [scanProductId, setScanProductId] = useState("");
   const [scanResult, setScanResult] = useState(null);
@@ -27,6 +33,73 @@ const RetailerDashboard = () => {
   const isBoxAlreadyVerified =
     boxProducts.length > 0 &&
     boxProducts.every((p) => p.verifiedByRetailer || p.sold);
+  const lastScanEntry = boxAnalyticsHistory[0] || null;
+  const recentScans = boxAnalyticsHistory.slice(0, 5);
+  const analyticsTotals = useMemo(
+    () =>
+      boxAnalyticsHistory.reduce(
+        (acc, entry) => ({
+          total: acc.total + (entry.total || 0),
+          verified: acc.verified + (entry.verified || 0),
+          sold: acc.sold + (entry.sold || 0)
+        }),
+        { total: 0, verified: 0, sold: 0 }
+      ),
+    [boxAnalyticsHistory]
+  );
+  const currentVerifiedCount = boxProducts.filter((p) => p.verifiedByRetailer).length;
+  const currentSoldCount = boxProducts.filter((p) => p.sold).length;
+  const currentPendingCount = Math.max(0, boxProducts.length - (currentVerifiedCount + currentSoldCount));
+  const lastScanVerifiedRate =
+    lastScanEntry && lastScanEntry.total ? (lastScanEntry.verified / lastScanEntry.total) * 100 : 0;
+  const historySoldRate = analyticsTotals.total ? (analyticsTotals.sold / analyticsTotals.total) * 100 : 0;
+  const formatCurrency = (value) => new Intl.NumberFormat("en-IN").format(Math.round(Math.max(0, Number(value) || 0)));
+  const formatDateTime = (value) => (value ? new Date(value).toLocaleString() : "-");
+  const loadRetailerShipments = async () => {
+    setShipmentsLoading(true);
+    try {
+      const data = await fetchRetailerShipments();
+      setShipmentsSummary(data.summary || null);
+      setRetailerShipments(data.shipments || []);
+    } catch (err) {
+      console.error("Retailer shipments load failed:", err);
+      setStatus(`Shipment feed failed: ${err?.message || "Please try again"}`);
+      setRetailerShipments([]);
+      setShipmentsSummary(null);
+    } finally {
+      setShipmentsLoading(false);
+    }
+  };
+
+  const summaryBoxes = shipmentsSummary?.totalBoxes || 0;
+  const summaryProducts = shipmentsSummary?.totalProducts || 0;
+  const summaryShipped = shipmentsSummary?.totalShipped || 0;
+  const summarySold = shipmentsSummary?.totalSold || 0;
+  const summaryTopManufacturer = shipmentsSummary?.topManufacturer || "Awaiting your first box";
+  const summaryBatch = shipmentsSummary?.mostRecentBatch ? `Batch ${shipmentsSummary.mostRecentBatch}` : "—";
+  const summaryRevenueValue = shipmentsSummary?.estimatedRevenue || 0;
+  const summaryProfitValue = shipmentsSummary?.estimatedProfit || 0;
+
+  const inventoryProducts = useMemo(() => {
+    const list = [];
+    retailerShipments.forEach((shipment) => {
+      const details = Array.isArray(shipment.productDetails) ? shipment.productDetails : [];
+      details.forEach((product) => {
+        list.push({
+          ...product,
+          boxId: shipment.boxId,
+          batchId: shipment.batchId,
+          manufacturerLabel: shipment.manufacturer?.label,
+          retailerName: shipment.retailer?.name || shipment.retailer?.label || "Retailer",
+          retailerEmail: shipment.retailer?.email || shipment.retailer?.label || null
+        });
+      });
+    });
+    return list;
+  }, [retailerShipments]);
+
+  const unsoldProducts = inventoryProducts.filter((product) => !product.sold);
+  const soldProducts = inventoryProducts.filter((product) => product.sold);
 
   const getStatusTone = (message) => {
     const text = String(message || "").toLowerCase();
@@ -56,20 +129,21 @@ const RetailerDashboard = () => {
     setStatus("");
     setBoxProducts([]);
     try {
-      if (!boxId || boxId.trim() === "") {
+      const normalizedBoxId = (boxId || "").trim();
+      if (!normalizedBoxId) {
         setStatus("Enter a Box ID first.");
         return;
       }
 
-      const assignment = await fetchBoxRetailerAssignment(boxId.trim());
+      const assignment = await fetchBoxRetailerAssignment(normalizedBoxId);
       if (!assignment.assignedToCurrent) {
         const recipient = assignment.retailerEmail || "another retailer";
-        setStatus(`Box ${boxId.trim()} is assigned to ${recipient}.`);
+        setStatus(`Box ${normalizedBoxId} is assigned to ${recipient}.`);
         setBoxProducts([]);
         return;
       }
 
-      const ids = await getProductIdsByBox(boxId.trim());
+      const ids = await getProductIdsByBox(normalizedBoxId);
       const fetched = [];
       for (const id of ids) {
         try {
@@ -90,7 +164,21 @@ const RetailerDashboard = () => {
         }
       }
       setBoxProducts(fetched);
-      setStatus(`Box ${boxId.trim()} — ${fetched.length} product(s) found.`);
+      setStatus(`Box ${normalizedBoxId} — ${fetched.length} product(s) found.`);
+
+      const verifiedCount = fetched.filter((p) => p.verifiedByRetailer).length;
+      const soldCount = fetched.filter((p) => p.sold).length;
+      setBoxAnalyticsHistory((prev) => {
+        const entry = {
+          boxId: normalizedBoxId,
+          total: fetched.length,
+          verified: verifiedCount,
+          sold: soldCount,
+          timestamp: new Date().toISOString()
+        };
+        const filtered = prev.filter((item) => item.boxId !== normalizedBoxId);
+        return [entry, ...filtered].slice(0, 5);
+      });
     } catch (e) {
       console.error(e);
       setStatus("Fetch box failed: " + (e?.message || e));
@@ -141,6 +229,7 @@ const RetailerDashboard = () => {
       }
       setBoxProducts(refreshed);
       setStatus(`All ${refreshed.length} product(s) verified for box ${bid}.`);
+      await loadRetailerShipments();
     } catch (e) {
       console.error(e);
       setStatus("Verify box failed: " + (e?.message || e));
@@ -187,19 +276,35 @@ const RetailerDashboard = () => {
       setStatus("Connect wallet first before marking sold.");
       return;
     }
+
+    const buyerEmail = (saleBuyerEmail || "").trim();
+    if (!buyerEmail) {
+      setStatus("Enter the buyer's email before marking sold.");
+      return;
+    }
+
     try {
+      setIsMarkingSold(true);
       setStatus("Marking product sold...");
-      await saleComplete(productIdToSell);
+      await saleComplete(productIdToSell, null, buyerEmail);
+      setSaleBuyerEmail("");
       setStatus("Product marked as SOLD on-chain.");
       if (scanResult && scanResult.product && scanResult.product.productId === productIdToSell) {
         const p = await getProduct(productIdToSell);
         setScanResult({ ...scanResult, product: p });
       }
+      await loadRetailerShipments();
     } catch (e) {
       console.error(e);
       setStatus("Mark sold failed: " + (e?.message || e));
+    } finally {
+      setIsMarkingSold(false);
     }
   };
+
+  useEffect(() => {
+    loadRetailerShipments();
+  }, []);
 
   return (
     <div className="retailer-page">
@@ -224,6 +329,12 @@ const RetailerDashboard = () => {
           onClick={() => setActiveSection("product")}
         >
           Product Authenticity
+        </button>
+        <button
+          className={`retailer-nav ${activeSection === "analytics" ? "active" : ""}`}
+          onClick={() => setActiveSection("analytics")}
+        >
+          Retailer Analytics
         </button>
 
         <div className="retailer-sidebar-foot">
@@ -353,11 +464,29 @@ const RetailerDashboard = () => {
                   </div>
 
                   {scanResult.ok && !scanResult.product?.sold && scanResult.product?.shipped && scanResult.product?.verifiedByRetailer && (
-                    <button className="btn-primary retailer-sold-btn" onClick={() => handleMarkSold(scanResult.product.productId)}>
-                      Mark as Sold (seal broken)
-                    </button>
+                    <div className="retailer-product-sale-row">
+                      <input
+                        type="email"
+                        className="retailer-input retailer-input-inline"
+                        placeholder="Buyer email (required to mark sold)"
+                        value={saleBuyerEmail}
+                        onChange={(e) => setSaleBuyerEmail(e.target.value)}
+                      />
+                      <button
+                        className="btn-primary retailer-sold-btn"
+                        onClick={() => handleMarkSold(scanResult.product.productId)}
+                        disabled={isMarkingSold}
+                      >
+                        {isMarkingSold ? "Marking sold..." : "Mark as Sold (seal broken)"}
+                      </button>
+                    </div>
                   )}
 
+                  {(!scanResult.product?.sold && scanResult.ok) && !isMarkingSold && !saleBuyerEmail && (
+                    <small className="retailer-inline-note">
+                      Enter the buyer's email before marking sold.
+                    </small>
+                  )}
                   {scanResult.ok && scanResult.product?.sold && (
                     <div className="status-banner status-warning retailer-inline-note">
                       This product is already sold.
@@ -372,6 +501,223 @@ const RetailerDashboard = () => {
                 </div>
               </div>
             )}
+          </section>
+        )}
+
+        {activeSection === "analytics" && (
+          <section className="retailer-card retailer-analytics-card">
+            <div className="retailer-analytics-head">
+              <div>
+                <h2>Retailer Analytics</h2>
+                <p>Track your verification performance and recent box scans without leaving the retailer console.</p>
+              </div>
+            </div>
+
+            <div className="retailer-analytics-grid">
+              <div className="retailer-analytics-kpi">
+                <span>Last Box Scanned</span>
+                <strong>{lastScanEntry ? lastScanEntry.boxId : "Awaiting first scan"}</strong>
+                <small>{lastScanEntry ? `${lastScanEntry.total} product(s)` : "Search a box to begin capturing metrics"}</small>
+              </div>
+              <div className="retailer-analytics-kpi">
+                <span>Last Verified Rate</span>
+                <strong>
+                  {lastScanEntry ? `${lastScanEntry.verified}/${lastScanEntry.total}` : "—"}
+                </strong>
+                <small>{lastScanEntry ? `${lastScanVerifiedRate.toFixed(0)}% verified` : ""}</small>
+              </div>
+              <div className="retailer-analytics-kpi">
+                <span>Current Box Sold</span>
+                <strong>{boxProducts.length ? `${currentSoldCount}` : "—"}</strong>
+                <small>
+                  {boxProducts.length
+                    ? `${currentSoldCount} sold • ${currentPendingCount} pending`
+                    : "Load a box to track sales"}
+                </small>
+              </div>
+              <div className="retailer-analytics-kpi">
+                <span>History Sold Rate</span>
+                <strong>{analyticsTotals.total ? `${historySoldRate.toFixed(1)}%` : "—"}</strong>
+                <small>{analyticsTotals.total ? `${analyticsTotals.sold} of ${analyticsTotals.total} tracked` : "No scans logged yet"}</small>
+              </div>
+            </div>
+
+            <div className="retailer-analytics-history">
+              <h4>Recent Box Scans</h4>
+              {recentScans.length ? (
+                <ul>
+                  {recentScans.map((entry) => (
+                    <li key={entry.timestamp}>
+                      <div className="retailer-analytics-history-row">
+                        <span className="retailer-analytics-history-box">{entry.boxId}</span>
+                        <span>{entry.total} items</span>
+                        <span>{entry.verified} verified</span>
+                        <span>{entry.sold} sold</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="retailer-history-placeholder">No scans logged yet—search a box to start building the timeline.</p>
+              )}
+            </div>
+
+            <div className="retailer-analytics-summary">
+              <div className="retailer-analytics-summary-grid">
+                <div className="retailer-analytics-summary-card">
+                  <span>Boxes delivered</span>
+                  <strong>{summaryBoxes}</strong>
+                  <small>{summaryBatch !== "—" ? summaryBatch : "Awaiting your first delivery"}</small>
+                </div>
+                <div className="retailer-analytics-summary-card">
+                  <span>Products received</span>
+                  <strong>{summaryProducts}</strong>
+                  <small>{summaryShipped} shipped • {summarySold} sold</small>
+                </div>
+                <div className="retailer-analytics-summary-card highlight">
+                  <span>Top partner</span>
+                  <strong>{summaryTopManufacturer}</strong>
+                  <small>{summaryBoxes ? `${summaryBoxes} boxes recorded` : "No boxes yet"}</small>
+                </div>
+                <div className="retailer-analytics-summary-card highlight">
+                  <span>Estimated retail value</span>
+                  <strong>₹{formatCurrency(summaryRevenueValue)}</strong>
+                  <small>₹1,499 MSRP</small>
+                </div>
+                <div className="retailer-analytics-summary-card highlight">
+                  <span>Potential profit</span>
+                  <strong>₹{formatCurrency(summaryProfitValue)}</strong>
+                  <small>Assumes 28% margin</small>
+                </div>
+              </div>
+            </div>
+
+            <div className="retailer-inventory-section">
+              <div className="retailer-inventory-column">
+                <div className="retailer-inventory-heading">
+                  <h4>Inventory on hand</h4>
+                  <span>{unsoldProducts.length} products</span>
+                </div>
+                {unsoldProducts.length === 0 ? (
+                  <p className="retailer-history-placeholder">No pending stock—verify a box to start counting inventory.</p>
+                ) : (
+                  <ul className="retailer-inventory-list">
+                    {unsoldProducts.slice(0, 6).map((product) => (
+                      <li key={`${product.productId}-pending`} className="retailer-inventory-row">
+                        <div>
+                          <strong>{product.productId}</strong>
+                          <small>Box {product.boxId || "—"} · {product.batchId || "—"}</small>
+                          <small>Lifecycle: {product.lifecycle}</small>
+                        </div>
+                        <div className="retailer-inventory-status">
+                          <span className={`status-banner ${product.shipped ? "status-success" : "status-warning"}`}>
+                            Shipped: {product.shipped ? "Yes" : "No"}
+                          </span>
+                          <span className={`status-banner ${product.verified ? "status-success" : "status-warning"}`}>
+                            Verified: {product.verified ? "Yes" : "No"}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="retailer-inventory-column">
+                <div className="retailer-inventory-heading">
+                  <h4>Sold items</h4>
+                  <span>{soldProducts.length} products</span>
+                </div>
+                {soldProducts.length === 0 ? (
+                  <p className="retailer-history-placeholder">No sales yet—mark a product as sold to populate this timeline.</p>
+                ) : (
+                  <ul className="retailer-inventory-list">
+                    {soldProducts.slice(0, 6).map((product) => (
+                      <li key={`${product.productId}-sold`} className="retailer-inventory-row">
+                        <div>
+                          <strong>{product.productId}</strong>
+                          <small>
+                            Sold to: {product.buyerName || product.soldToEmail || "unknown customer"}
+                          </small>
+                          <small>Email: {product.soldToEmail || "—"}</small>
+                          <small>Sold on {product.soldAt ? formatDateTime(product.soldAt) : "—"}</small>
+                        </div>
+                        <div className="retailer-inventory-status">
+                          <span className="status-banner status-success">Lifecycle: {product.lifecycle}</span>
+                          <span className="status-banner status-info">
+                            Manufacturer: {product.manufacturerLabel}
+                          </span>
+                          <span className="retailer-inventory-chip">{product.retailerName}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+
+            <div className="retailer-shipment-feed">
+              <div className="retailer-shipment-feed-head">
+                <h4>Shipment feed</h4>
+                {shipmentsLoading && <span className="retailer-shipment-refresh">Refreshing shipment stories…</span>}
+              </div>
+              {shipmentsLoading ? (
+                <p className="products-loading">Loading shipments...</p>
+              ) : retailerShipments.length === 0 ? (
+                <p className="retailer-history-placeholder">
+                  No retailer shipments logged yet—pull a box into this console to begin recording the narrative.
+                </p>
+              ) : (
+                <div className="retailer-shipment-list">
+                  {retailerShipments.map((shipment) => {
+                    const statusTone =
+                      shipment.soldCount === shipment.productCount && shipment.productCount
+                        ? "status-success"
+                        : shipment.verifiedCount === shipment.productCount && shipment.productCount
+                          ? "status-info"
+                          : "status-warning";
+                    const statusLabel =
+                      shipment.soldCount === shipment.productCount && shipment.productCount
+                        ? "Fully sold"
+                        : shipment.verifiedCount === shipment.productCount && shipment.productCount
+                          ? "Verified"
+                          : "In transit";
+                    return (
+                      <article key={`${shipment.boxId}-${shipment.createdAt}`} className="retailer-shipment-card">
+                        <header className="retailer-shipment-head">
+                          <strong>Box {shipment.boxId}</strong>
+                          <span>{formatDateTime(shipment.createdAt)}</span>
+                          <span className={`retailer-shipment-status ${statusTone}`}>{statusLabel}</span>
+                        </header>
+                        <div className="retailer-shipment-meta">
+                          <p>Manufacturer: {shipment.manufacturer.label}</p>
+                          <p>Retailer: {shipment.retailer?.label || "Retailer"} ({shipment.retailer?.email || "no email"})</p>
+                          <p>Batch: {shipment.batchId}</p>
+                          <p>Delivery: {shipment.shippingAddress || "TBD"}</p>
+                          <p className="retailer-shipment-meta-line">
+                            {shipment.productCount} items · {shipment.shippedCount} shipped · {shipment.verifiedCount} verified · {shipment.soldCount} sold
+                          </p>
+                        </div>
+                        <div className="retailer-shipment-products">
+                          {shipment.topProducts.map((product) => (
+                            <span key={product.productId} className="retailer-shipment-product-pill">
+                              <strong>{product.productId}</strong>
+                              <em>{product.lifecycle}</em>
+                            </span>
+                          ))}
+                        </div>
+                        <div className="retailer-shipment-footer">
+                          <strong>Retailer ripple ₹{formatCurrency(shipment.estimatedProfit)}</strong>
+                          <small>MSRP ₹1,499 · 28% margin</small>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="retailer-shipment-footnote">
+                *Estimated ripple captures what this batch delivers to your topline—dispatch more to keep the feed glowing.
+              </p>
+            </div>
           </section>
         )}
 

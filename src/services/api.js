@@ -146,3 +146,43 @@ export async function fetchBoxRetailerAssignment(boxId) {
 
   return res.json();
 }
+
+export async function fetchProductDetail(productId) {
+  if (!productId) return null;
+  const res = await fetch(`${BASE_URL}/api/db/product/${encodeURIComponent(productId)}/detail`, {
+    headers: getAuthHeaders()
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to fetch product detail");
+  }
+
+  return res.json();
+}
+
+export async function fetchUserPurchases() {
+  const res = await fetch(`${BASE_URL}/api/db/user/purchases`, {
+    headers: getAuthHeaders()
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to fetch your purchases");
+  }
+
+  return res.json();
+}
+
+export async function fetchRetailerShipments() {
+  const res = await fetch(`${BASE_URL}/api/db/retailer/shipments`, {
+    headers: getAuthHeaders()
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to load retailer shipments");
+  }
+
+  return res.json();
+}

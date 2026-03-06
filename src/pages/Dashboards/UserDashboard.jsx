@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ShieldCheck,
   Search,
@@ -14,7 +14,7 @@ import {
   Boxes,
   CheckCheck
 } from "lucide-react";
-import { requestChallenge, verifyResponse } from "../../services/api";
+import { requestChallenge, verifyResponse, fetchUserPurchases } from "../../services/api";
 import { scanNfcTag } from "../../nfc/nfcScanner";
 import BackButton from "../../components/BackButton";
 import "../../user.css";
@@ -27,9 +27,18 @@ export default function UserDashboard() {
   const [product, setProduct] = useState(null);
   const [searching, setSearching] = useState(false);
   const [productId, setProductId] = useState("");
+  const [purchases, setPurchases] = useState([]);
+  const [loadingPurchases, setLoadingPurchases] = useState(false);
+  const [purchaseError, setPurchaseError] = useState("");
 
   const searchProductId = productId.trim();
   const isVerified = Boolean(product?.verifiedByRetailer);
+  const formatDateTime = (value) => {
+    if (!value) return "-";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "-";
+    return date.toLocaleString();
+  };
 
   const getStatusTone = (message) => {
     const text = String(message || "").toLowerCase();
@@ -78,6 +87,33 @@ export default function UserDashboard() {
     }
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadPurchases = async () => {
+      setLoadingPurchases(true);
+      setPurchaseError("");
+      try {
+        const { purchases: userPurchases = [] } = await fetchUserPurchases();
+        if (!cancelled) {
+          setPurchases(userPurchases);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setPurchaseError(err.message || "Unable to load purchases");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingPurchases(false);
+        }
+      }
+    };
+
+    loadPurchases();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="user-page">
       <BackButton to="/roles" />
@@ -113,8 +149,9 @@ export default function UserDashboard() {
 
       <main className="user-main">
         {activeSection === "verify" && (
-          <section className="user-card">
-            <h2><ShieldCheck size={20} /> Product Verification Portal</h2>
+          <>
+            <section className="user-card">
+              <h2><ShieldCheck size={20} /> Product Verification Portal</h2>
             <p className="user-subtext">
               Enter a product ID and verify authenticity using challenge-response.
             </p>
@@ -177,7 +214,52 @@ export default function UserDashboard() {
                 </div>
               </div>
             )}
-          </section>
+            </section>
+
+            <section className="user-card user-purchases-card">
+              <div className="user-card-header">
+                <h2><ShoppingCart size={20} /> Your Purchases</h2>
+                <p className="user-subtext">
+                  Track every completed purchase and the retailer that delivered it.
+                </p>
+              </div>
+              {loadingPurchases ? (
+                <p className="products-loading">Loading purchase history…</p>
+              ) : purchaseError ? (
+                <p className="user-history-placeholder">{purchaseError}</p>
+              ) : purchases.length === 0 ? (
+                <p className="user-history-placeholder">
+                  No purchases recorded yet. Once a retailer settles your item, it appears here.
+                </p>
+              ) : (
+                <div className="user-purchases-list">
+                  {purchases.map((purchase) => (
+                    <article key={`${purchase.productId}-${purchase.soldAt}`} className="user-purchase-row">
+                      <div className="user-purchase-info">
+                        <strong>Product {purchase.productId}</strong>
+                        <span>Box {purchase.boxId || "—"} · Batch {purchase.batchId || "—"}</span>
+                        <span>
+                          Manufacturer: {purchase.manufacturerName || "Unknown"}{" "}
+                          <em>({purchase.manufacturerEmail || "No email"})</em>
+                        </span>
+                        <span>
+                          Retailer: {purchase.retailerName || "Unknown"}{" "}
+                          <em>({purchase.retailerEmail || "No email"})</em>
+                        </span>
+                      </div>
+                      <div className="user-purchase-meta">
+                        <span className="user-purchase-meta-line">Purchased: {formatDateTime(purchase.soldAt)}</span>
+                        <span className="user-purchase-meta-line">
+                          Shipping address: {purchase.shippingAddress || "To be confirmed"}
+                        </span>
+                        <span className="user-status-tag">Verified delivery</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
         )}
 
         {activeSection === "about" && (

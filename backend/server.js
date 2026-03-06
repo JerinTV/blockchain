@@ -84,6 +84,15 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireRole(role) {
+  return (req, res, next) => {
+    if (req.user.role !== role) {
+      return res.status(403).json({ error: `${role} access required` });
+    }
+    next();
+  };
+}
+
 function getScopedManufacturerId(req, res) {
   const isAdmin = req.user.role === "ADMIN";
 
@@ -177,6 +186,11 @@ app.get("/api/db/box/:boxId/products", authenticate, async (req, res) => {
       return res.status(400).json({ error: "boxId is required" });
     }
 
+    const buyerEmail = String(req.body?.buyerEmail || req.body?.userEmail || "").trim();
+    if (!buyerEmail) {
+      return res.status(400).json({ error: "Buyer email is required" });
+    }
+
     const box = await prisma.box.findUnique({
       where: {
         manufacturerId_boxId: {
@@ -185,6 +199,13 @@ app.get("/api/db/box/:boxId/products", authenticate, async (req, res) => {
         }
       },
       include: {
+        retailer: {
+          select: {
+            id: true,
+            username: true,
+            email: true
+          }
+        },
         products: {
           select: {
             productId: true,
@@ -193,6 +214,8 @@ app.get("/api/db/box/:boxId/products", authenticate, async (req, res) => {
             shipped: true,
             verified: true,
             sold: true,
+            soldToEmail: true,
+            soldAt: true,
             createdAt: true
           },
           orderBy: { productId: "asc" }
@@ -208,7 +231,8 @@ app.get("/api/db/box/:boxId/products", authenticate, async (req, res) => {
       box: {
         boxId: box.boxId,
         batchId: box.batchId,
-        createdAt: box.createdAt
+        createdAt: box.createdAt,
+        retailer: box.retailer
       },
       products: box.products
     });
@@ -236,7 +260,12 @@ app.get("/api/db/box/:boxId/assignment", authenticate, async (req, res) => {
       },
       select: {
         boxId: true,
-        retailerEmail: true
+        retailerEmail: true,
+        retailer: {
+          select: {
+            username: true
+          }
+        }
       },
       orderBy: { createdAt: "desc" }
     });
@@ -246,23 +275,199 @@ app.get("/api/db/box/:boxId/assignment", authenticate, async (req, res) => {
         boxId
       },
       select: {
-        retailerEmail: true
+        retailerEmail: true,
+        retailer: {
+          select: {
+            username: true
+          }
+        }
       },
       orderBy: { createdAt: "desc" }
     });
 
     if (!assigned && !any) {
-      return res.status(404).json({ error: "Box not found" });
-    }
+    return res.status(404).json({ error: "Box not found" });
+  }
 
     return res.json({
       boxId,
       assignedToCurrent: Boolean(assigned),
-      retailerEmail: any?.retailerEmail || null
+      retailerEmail: any?.retailerEmail || null,
+      assignedRetailerName: assigned?.retailer?.username || null,
+      latestRetailerName: any?.retailer?.username || null
+    });
+} catch (err) {
+  console.error("âŒ Box assignment check failed:", err);
+  res.status(500).json({ error: "Box assignment check failed" });
+}
+});
+
+app.get("/api/db/retailer/shipments", authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== "RETAILER") {
+      return res.status(403).json({ error: "Retailer access required" });
+    }
+
+    const shipments = await prisma.box.findMany({
+      where: {
+        retailerId: req.user.userId
+      },
+      include: {
+        manufacturer: {
+          select: {
+            id: true,
+            username: true,
+            email: true
+          }
+        },
+        products: {
+          select: {
+            productId: true,
+            lifecycle: true,
+            shipped: true,
+            verified: true,
+            sold: true,
+            soldToEmail: true,
+            soldAt: true
+          },
+          orderBy: { createdAt: "desc" }
+        }
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20
+    });
+
+    const SELL_PRICE_PER_ITEM = 1499;
+    const MARGIN_RATE = 0.28;
+
+    const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+    const allSoldEmails = new Set();
+    shipments.forEach((box) => {
+      box.products.forEach((product) => {
+        const normalized = normalizeEmail(product.soldToEmail);
+        if (normalized) allSoldEmails.add(normalized);
+      });
+    });
+    const buyerUsers =
+      allSoldEmails.size > 0
+        ? await prisma.user.findMany({
+            where: {
+              email: {
+                in: Array.from(allSoldEmails)
+              }
+            },
+            select: {
+              email: true,
+              username: true
+            }
+          })
+        : [];
+    const buyerMap = new Map(buyerUsers.map((buyer) => [normalizeEmail(buyer.email), buyer.username]));
+
+    const shipmentPayload = shipments.map((box) => {
+      const productCount = box.products.length;
+      const shippedCount = box.products.filter((p) => p.shipped).length;
+      const verifiedCount = box.products.filter((p) => p.verified).length;
+      const soldCount = box.products.filter((p) => p.sold).length;
+      const manufacturerLabel = box.manufacturer?.username || box.manufacturer?.email || "Trusted partner";
+      const retailerLabel = box.retailer?.username || box.retailer?.email || box.retailerEmail || "Retailer";
+      const retailerEmail = box.retailer?.email || box.retailerEmail || null;
+      const retailerName = box.retailer?.username || box.retailer?.email || null;
+
+      const estimatedRevenue = soldCount * SELL_PRICE_PER_ITEM;
+      const estimatedProfit = Math.round(estimatedRevenue * MARGIN_RATE);
+
+      return {
+        boxId: box.boxId,
+        batchId: box.batchId,
+        createdAt: box.createdAt,
+        shippingAddress: box.shippingAddress || "",
+        manufacturer: {
+          id: box.manufacturer?.id || null,
+          label: manufacturerLabel
+        },
+        retailer: {
+          id: box.retailer?.id || null,
+          email: retailerEmail,
+          name: retailerName,
+          label: retailerLabel
+        },
+        productCount,
+        shippedCount,
+        verifiedCount,
+        soldCount,
+        productDetails: box.products.map((product) => ({
+          productId: product.productId,
+          lifecycle: product.lifecycle,
+          shipped: product.shipped,
+          verified: product.verified,
+          sold: product.sold,
+          soldToEmail: product.soldToEmail,
+          soldAt: product.soldAt,
+          buyerName: (() => {
+            const key = normalizeEmail(product.soldToEmail);
+            return key ? buyerMap.get(key) || null : null;
+          })(),
+          batchId: product.batchId,
+          boxId: box.boxId
+        })),
+        topProducts: box.products.slice(0, 5).map((product) => ({
+          productId: product.productId,
+          lifecycle: product.lifecycle,
+          soldToEmail: product.soldToEmail,
+          soldAt: product.soldAt
+        })),
+        estimatedRevenue,
+        estimatedProfit
+      };
+    });
+
+    const summary = shipmentPayload.reduce(
+      (acc, item) => {
+        acc.totalBoxes += 1;
+        acc.totalProducts += item.productCount;
+        acc.totalShipped += item.shippedCount;
+        acc.totalVerified += item.verifiedCount;
+        acc.totalSold += item.soldCount;
+        acc.estimatedRevenue += item.estimatedRevenue;
+        acc.estimatedProfit += item.estimatedProfit;
+        acc.manufacturerCount[item.manufacturer.label] = (acc.manufacturerCount[item.manufacturer.label] || 0) + 1;
+        return acc;
+      },
+      {
+        totalBoxes: 0,
+        totalProducts: 0,
+        totalShipped: 0,
+        totalVerified: 0,
+        totalSold: 0,
+        estimatedRevenue: 0,
+        estimatedProfit: 0,
+        manufacturerCount: {}
+      }
+    );
+
+    const topManufacturerEntry = Object.entries(summary.manufacturerCount).sort((a, b) => b[1] - a[1])[0] || [];
+    const topManufacturer = topManufacturerEntry[0] || null;
+
+    const summaryPayload = {
+      totalBoxes: summary.totalBoxes,
+      totalProducts: summary.totalProducts,
+      totalShipped: summary.totalShipped,
+      totalVerified: summary.totalVerified,
+      totalSold: summary.totalSold,
+      estimatedRevenue: summary.estimatedRevenue,
+      estimatedProfit: summary.estimatedProfit,
+      topManufacturer,
+      mostRecentBatch: shipmentPayload[0]?.batchId || null
+    };
+
+    return res.json({
+      summary: summaryPayload,
+      shipments: shipmentPayload
     });
   } catch (err) {
-    console.error("âŒ Box assignment check failed:", err);
-    res.status(500).json({ error: "Box assignment check failed" });
+    console.error("❌ Retailer shipment feed failed:", err);
+    res.status(500).json({ error: "Retailer shipment feed failed" });
   }
 });
 
@@ -325,6 +530,119 @@ app.get("/api/db/resolve/product/:productId", authenticate, async (req, res) => 
   } catch (err) {
     console.error("❌ Product manufacturer resolve failed:", err);
     res.status(500).json({ error: "Product manufacturer resolve failed" });
+  }
+});
+
+app.get("/api/db/product/:productId/detail", authenticate, async (req, res) => {
+  try {
+    const productId = String(req.params.productId || "").trim();
+    if (!productId) {
+      return res.status(400).json({ error: "productId is required" });
+    }
+
+    const manufacturerId = await getMutationManufacturerIdResolved(req, res);
+    if (!manufacturerId) return;
+
+    const product = await prisma.product.findFirst({
+      where: { manufacturerId, productId },
+      include: {
+        box: {
+          select: {
+            boxId: true,
+            batchId: true,
+            shippingAddress: true,
+            retailerEmail: true,
+            retailer: {
+              select: {
+                id: true,
+                username: true,
+                email: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    return res.json({
+      product: {
+        productId: product.productId,
+        lifecycle: product.lifecycle,
+        shipped: product.shipped,
+        verified: product.verified,
+        sold: product.sold,
+        soldToEmail: product.soldToEmail,
+        soldAt: product.soldAt,
+        box: product.box
+      }
+    });
+  } catch (err) {
+    console.error("❌ Product detail failed:", err);
+    res.status(500).json({ error: "Product detail fetch failed" });
+  }
+});
+
+app.get("/api/db/user/purchases", authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== "USER") {
+      return res.status(403).json({ error: "User access required" });
+    }
+
+    const userEmail = String(req.user.email || "").trim();
+    if (!userEmail) {
+      return res.status(400).json({ error: "User email missing" });
+    }
+
+    const purchases = await prisma.product.findMany({
+      where: {
+        soldToEmail: userEmail,
+        sold: true
+      },
+      include: {
+        box: {
+          select: {
+            boxId: true,
+            batchId: true,
+            shippingAddress: true,
+            manufacturer: {
+              select: {
+                username: true,
+                email: true
+              }
+            },
+            retailer: {
+              select: {
+                username: true,
+                email: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { soldAt: "desc" },
+      take: 20
+    });
+
+    const payload = purchases.map((product) => ({
+      productId: product.productId,
+      soldAt: product.soldAt,
+      retailerEmail: product.box?.retailer?.email || product.box?.retailerEmail || null,
+      retailerName: product.box?.retailer?.username || null,
+      manufacturerEmail: product.box?.manufacturer?.email || null,
+      manufacturerName: product.box?.manufacturer?.username || null,
+      boxId: product.box?.boxId || null,
+      batchId: product.box?.batchId || null,
+      shippingAddress: product.box?.shippingAddress || null
+    }));
+
+    return res.json({ purchases: payload });
+  } catch (err) {
+    console.error("❌ User purchases failed:", err);
+    res.status(500).json({ error: "User purchases fetch failed" });
   }
 });
 
@@ -596,6 +914,15 @@ app.get("/api/db/dashboard/summary", authenticate, async (req, res) => {
           boxId: true,
           batchId: true,
           createdAt: true,
+          shippingAddress: true,
+          retailerEmail: true,
+          retailer: {
+            select: {
+              id: true,
+              username: true,
+              email: true
+            }
+          },
           _count: {
             select: { products: true }
           }
@@ -821,7 +1148,9 @@ app.post("/api/db/box/:boxId/sold", authenticate, async (req, res) => {
       data: {
         sold: true,
         verified: true,
-        shipped: true
+        shipped: true,
+        soldToEmail: buyerEmail,
+        soldAt: new Date()
       }
     });
 
@@ -914,6 +1243,11 @@ app.post("/api/db/product/:productId/sold", authenticate, async (req, res) => {
       return res.status(400).json({ error: "productId is required" });
     }
 
+    const buyerEmail = String(req.body?.buyerEmail || req.body?.userEmail || "").trim();
+    if (!buyerEmail) {
+      return res.status(400).json({ error: "Buyer email is required" });
+    }
+
     const product = await prisma.product.findFirst({
       where: { manufacturerId, productId },
       include: {
@@ -942,7 +1276,11 @@ app.post("/api/db/product/:productId/sold", authenticate, async (req, res) => {
         productId
       },
       data: {
-        sold: true
+        sold: true,
+        verified: true,
+        shipped: true,
+        soldToEmail: buyerEmail,
+        soldAt: new Date()
       }
     });
 

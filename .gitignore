@@ -41,3 +41,4 @@ public/uberlin.zip
 *.sln
 *.sw?
 
+backend/.env

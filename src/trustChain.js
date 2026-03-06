@@ -216,7 +216,7 @@ export const verifyBox = async (boxId, manufacturerId = null) => {
   console.log("✅ Box verified by Retailer:", boxId);
 };
 
-export const saleCompleteBox = async (boxId, manufacturerId = null) => {
+export const saleCompleteBox = async (boxId, manufacturerId = null, buyerEmail = "") => {
   const contract = await getContract();
   try {
     const tx = await contract.saleBox(boxId);
@@ -241,14 +241,18 @@ export const saleCompleteBox = async (boxId, manufacturerId = null) => {
 
   const token = localStorage.getItem("token");
   const resolvedManufacturerId = manufacturerId ?? await resolveManufacturerIdByBox(boxId, token);
-  const query = buildManufacturerQuery(resolvedManufacturerId);
-  const syncRes = await fetch(`${API_BASE}/api/db/box/${encodeURIComponent(boxId)}/sold${query}`, {
+   const normalizedBuyerEmail = String(buyerEmail || "").trim();
+   const query = buildManufacturerQuery(resolvedManufacturerId);
+   const syncRes = await fetch(`${API_BASE}/api/db/box/${encodeURIComponent(boxId)}/sold${query}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${token}`
     },
-    body: JSON.stringify({ manufacturerId: resolvedManufacturerId })
+    body: JSON.stringify({
+      manufacturerId: resolvedManufacturerId,
+      buyerEmail: normalizedBuyerEmail || undefined
+    })
   });
 
   if (!syncRes.ok) {
@@ -284,7 +288,7 @@ export const verifyProduct = async (productId, manufacturerId = null) => {
 
 /* ================= SALE ================= */
 
-export const saleComplete = async (productId, manufacturerId = null) => {
+export const saleComplete = async (productId, manufacturerId = null, buyerEmail = "") => {
   const contract = await getContract();
   const tx = await contract.saleComplete(productId);
   await tx.wait();
@@ -292,13 +296,17 @@ export const saleComplete = async (productId, manufacturerId = null) => {
   const token = localStorage.getItem("token");
   const resolvedManufacturerId = manufacturerId ?? await resolveManufacturerIdByProduct(productId, token);
   const query = buildManufacturerQuery(resolvedManufacturerId);
+  const normalizedBuyerEmail = String(buyerEmail || "").trim();
   const syncRes = await fetch(`${API_BASE}/api/db/product/${encodeURIComponent(productId)}/sold${query}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${token}`
     },
-    body: JSON.stringify({ manufacturerId: resolvedManufacturerId })
+    body: JSON.stringify({
+      manufacturerId: resolvedManufacturerId,
+      buyerEmail: normalizedBuyerEmail || undefined
+    })
   });
 
   if (!syncRes.ok) {
