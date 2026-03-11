@@ -28,8 +28,19 @@ export async function requestChallenge(productId) {
   const data = await res.json();
 
   console.log("API DEBUG /challenge response:", data);
+  if (data?.challenge) {
+    return data;
+  }
 
-  return data; // MUST be { challenge: "..." }
+  if (data?.status === "FAKE") {
+    throw new Error(data.reason || "Product is not registered on the active blockchain");
+  }
+
+  if (data?.status === "NOT_READY") {
+    throw new Error("Product is not yet shipped and retailer-verified on the active blockchain");
+  }
+
+  throw new Error("Challenge unavailable for this product");
 }
 
 

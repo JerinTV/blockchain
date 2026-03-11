@@ -20,7 +20,6 @@ const RetailerDashboard = () => {
   const [boxId, setBoxId] = useState("");
   const [boxProducts, setBoxProducts] = useState([]);
   const [isVerifyingBox, setIsVerifyingBox] = useState(false);
-  const [boxAnalyticsHistory, setBoxAnalyticsHistory] = useState([]);
   const [saleBuyerEmail, setSaleBuyerEmail] = useState("");
   const [isMarkingSold, setIsMarkingSold] = useState(false);
   const [retailerShipments, setRetailerShipments] = useState([]);
@@ -33,26 +32,8 @@ const RetailerDashboard = () => {
   const isBoxAlreadyVerified =
     boxProducts.length > 0 &&
     boxProducts.every((p) => p.verifiedByRetailer || p.sold);
-  const lastScanEntry = boxAnalyticsHistory[0] || null;
-  const recentScans = boxAnalyticsHistory.slice(0, 5);
-  const analyticsTotals = useMemo(
-    () =>
-      boxAnalyticsHistory.reduce(
-        (acc, entry) => ({
-          total: acc.total + (entry.total || 0),
-          verified: acc.verified + (entry.verified || 0),
-          sold: acc.sold + (entry.sold || 0)
-        }),
-        { total: 0, verified: 0, sold: 0 }
-      ),
-    [boxAnalyticsHistory]
-  );
   const currentVerifiedCount = boxProducts.filter((p) => p.verifiedByRetailer).length;
   const currentSoldCount = boxProducts.filter((p) => p.sold).length;
-  const currentPendingCount = Math.max(0, boxProducts.length - (currentVerifiedCount + currentSoldCount));
-  const lastScanVerifiedRate =
-    lastScanEntry && lastScanEntry.total ? (lastScanEntry.verified / lastScanEntry.total) * 100 : 0;
-  const historySoldRate = analyticsTotals.total ? (analyticsTotals.sold / analyticsTotals.total) * 100 : 0;
   const formatCurrency = (value) => new Intl.NumberFormat("en-IN").format(Math.round(Math.max(0, Number(value) || 0)));
   const formatDateTime = (value) => (value ? new Date(value).toLocaleString() : "-");
   const loadRetailerShipments = async () => {
@@ -165,20 +146,6 @@ const RetailerDashboard = () => {
       }
       setBoxProducts(fetched);
       setStatus(`Box ${normalizedBoxId} — ${fetched.length} product(s) found.`);
-
-      const verifiedCount = fetched.filter((p) => p.verifiedByRetailer).length;
-      const soldCount = fetched.filter((p) => p.sold).length;
-      setBoxAnalyticsHistory((prev) => {
-        const entry = {
-          boxId: normalizedBoxId,
-          total: fetched.length,
-          verified: verifiedCount,
-          sold: soldCount,
-          timestamp: new Date().toISOString()
-        };
-        const filtered = prev.filter((item) => item.boxId !== normalizedBoxId);
-        return [entry, ...filtered].slice(0, 5);
-      });
     } catch (e) {
       console.error(e);
       setStatus("Fetch box failed: " + (e?.message || e));
@@ -509,57 +476,8 @@ const RetailerDashboard = () => {
             <div className="retailer-analytics-head">
               <div>
                 <h2>Retailer Analytics</h2>
-                <p>Track your verification performance and recent box scans without leaving the retailer console.</p>
+                <p>Track live shipment status, current inventory, and sell-through from one place.</p>
               </div>
-            </div>
-
-            <div className="retailer-analytics-grid">
-              <div className="retailer-analytics-kpi">
-                <span>Last Box Scanned</span>
-                <strong>{lastScanEntry ? lastScanEntry.boxId : "Awaiting first scan"}</strong>
-                <small>{lastScanEntry ? `${lastScanEntry.total} product(s)` : "Search a box to begin capturing metrics"}</small>
-              </div>
-              <div className="retailer-analytics-kpi">
-                <span>Last Verified Rate</span>
-                <strong>
-                  {lastScanEntry ? `${lastScanEntry.verified}/${lastScanEntry.total}` : "—"}
-                </strong>
-                <small>{lastScanEntry ? `${lastScanVerifiedRate.toFixed(0)}% verified` : ""}</small>
-              </div>
-              <div className="retailer-analytics-kpi">
-                <span>Current Box Sold</span>
-                <strong>{boxProducts.length ? `${currentSoldCount}` : "—"}</strong>
-                <small>
-                  {boxProducts.length
-                    ? `${currentSoldCount} sold • ${currentPendingCount} pending`
-                    : "Load a box to track sales"}
-                </small>
-              </div>
-              <div className="retailer-analytics-kpi">
-                <span>History Sold Rate</span>
-                <strong>{analyticsTotals.total ? `${historySoldRate.toFixed(1)}%` : "—"}</strong>
-                <small>{analyticsTotals.total ? `${analyticsTotals.sold} of ${analyticsTotals.total} tracked` : "No scans logged yet"}</small>
-              </div>
-            </div>
-
-            <div className="retailer-analytics-history">
-              <h4>Recent Box Scans</h4>
-              {recentScans.length ? (
-                <ul>
-                  {recentScans.map((entry) => (
-                    <li key={entry.timestamp}>
-                      <div className="retailer-analytics-history-row">
-                        <span className="retailer-analytics-history-box">{entry.boxId}</span>
-                        <span>{entry.total} items</span>
-                        <span>{entry.verified} verified</span>
-                        <span>{entry.sold} sold</span>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="retailer-history-placeholder">No scans logged yet—search a box to start building the timeline.</p>
-              )}
             </div>
 
             <div className="retailer-analytics-summary">

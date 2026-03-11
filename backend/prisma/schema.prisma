@@ -39,6 +39,7 @@ model User {
   products      Product[]
   boxes         Box[]    @relation("ManufacturerBoxes")
   assignedBoxes Box[]    @relation("RetailerBoxes")
+  boxScanEvents BoxScanEvent[] @relation("RetailerScanEvents")
 
   @@index([role])
   @@index([username])
@@ -58,11 +59,29 @@ model Box {
   manufacturer User  @relation("ManufacturerBoxes", fields: [manufacturerId], references: [id])
   retailer     User? @relation("RetailerBoxes", fields: [retailerId], references: [id])
   products     Product[]
+  scanEvents   BoxScanEvent[]
 
   @@unique([manufacturerId, boxId])
   @@index([manufacturerId, batchId])
   @@index([boxId])
   @@index([batchId])
+}
+
+model BoxScanEvent {
+  id               Int      @id @default(autoincrement())
+  retailerId       Int
+  manufacturerId   Int
+  boxId            Int
+  totalProducts    Int
+  verifiedProducts Int
+  soldProducts     Int
+  scannedAt        DateTime @default(now())
+
+  retailer User @relation("RetailerScanEvents", fields: [retailerId], references: [id])
+  box      Box  @relation(fields: [boxId], references: [id], onDelete: Cascade)
+
+  @@index([retailerId, scannedAt])
+  @@index([manufacturerId, boxId])
 }
 
 model Product {

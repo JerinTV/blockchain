@@ -80,7 +80,7 @@ export default function UserDashboard() {
       }
     } catch (err) {
       console.error("Verification error:", err);
-      setStatus("❌ Verification failed");
+      setStatus(`❌ ${err?.message || "Verification failed"}`);
       setProduct(null);
     } finally {
       setSearching(false);

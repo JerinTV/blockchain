@@ -363,64 +363,72 @@ app.get("/api/db/retailer/shipments", authenticate, async (req, res) => {
           })
         : [];
     const buyerMap = new Map(buyerUsers.map((buyer) => [normalizeEmail(buyer.email), buyer.username]));
+    const onChainAvailability = await getOnChainAvailabilityMap(
+      shipments.flatMap((box) => box.products.map((product) => product.productId))
+    );
 
-    const shipmentPayload = shipments.map((box) => {
-      const productCount = box.products.length;
-      const shippedCount = box.products.filter((p) => p.shipped).length;
-      const verifiedCount = box.products.filter((p) => p.verified).length;
-      const soldCount = box.products.filter((p) => p.sold).length;
-      const manufacturerLabel = box.manufacturer?.username || box.manufacturer?.email || "Trusted partner";
-      const retailerLabel = box.retailer?.username || box.retailer?.email || box.retailerEmail || "Retailer";
-      const retailerEmail = box.retailer?.email || box.retailerEmail || null;
-      const retailerName = box.retailer?.username || box.retailer?.email || null;
+    const activeBoxIds = new Set();
+    const shipmentPayload = shipments
+      .map((box) => {
+        const activeProducts = box.products.filter((product) => onChainAvailability.get(product.productId));
+        const productCount = activeProducts.length;
+        if (productCount > 0) activeBoxIds.add(box.id);
+        const shippedCount = activeProducts.filter((p) => p.shipped).length;
+        const verifiedCount = activeProducts.filter((p) => p.verified).length;
+        const soldCount = activeProducts.filter((p) => p.sold).length;
+        const manufacturerLabel = box.manufacturer?.username || box.manufacturer?.email || "Trusted partner";
+        const retailerLabel = box.retailer?.username || box.retailer?.email || box.retailerEmail || "Retailer";
+        const retailerEmail = box.retailer?.email || box.retailerEmail || null;
+        const retailerName = box.retailer?.username || box.retailer?.email || null;
 
-      const estimatedRevenue = soldCount * SELL_PRICE_PER_ITEM;
-      const estimatedProfit = Math.round(estimatedRevenue * MARGIN_RATE);
+        const estimatedRevenue = soldCount * SELL_PRICE_PER_ITEM;
+        const estimatedProfit = Math.round(estimatedRevenue * MARGIN_RATE);
 
-      return {
-        boxId: box.boxId,
-        batchId: box.batchId,
-        createdAt: box.createdAt,
-        shippingAddress: box.shippingAddress || "",
-        manufacturer: {
-          id: box.manufacturer?.id || null,
-          label: manufacturerLabel
-        },
-        retailer: {
-          id: box.retailer?.id || null,
-          email: retailerEmail,
-          name: retailerName,
-          label: retailerLabel
-        },
-        productCount,
-        shippedCount,
-        verifiedCount,
-        soldCount,
-        productDetails: box.products.map((product) => ({
-          productId: product.productId,
-          lifecycle: product.lifecycle,
-          shipped: product.shipped,
-          verified: product.verified,
-          sold: product.sold,
-          soldToEmail: product.soldToEmail,
-          soldAt: product.soldAt,
-          buyerName: (() => {
-            const key = normalizeEmail(product.soldToEmail);
-            return key ? buyerMap.get(key) || null : null;
-          })(),
-          batchId: product.batchId,
-          boxId: box.boxId
-        })),
-        topProducts: box.products.slice(0, 5).map((product) => ({
-          productId: product.productId,
-          lifecycle: product.lifecycle,
-          soldToEmail: product.soldToEmail,
-          soldAt: product.soldAt
-        })),
-        estimatedRevenue,
-        estimatedProfit
-      };
-    });
+        return {
+          boxId: box.boxId,
+          batchId: box.batchId,
+          createdAt: box.createdAt,
+          shippingAddress: box.shippingAddress || "",
+          manufacturer: {
+            id: box.manufacturer?.id || null,
+            label: manufacturerLabel
+          },
+          retailer: {
+            id: box.retailer?.id || null,
+            email: retailerEmail,
+            name: retailerName,
+            label: retailerLabel
+          },
+          productCount,
+          shippedCount,
+          verifiedCount,
+          soldCount,
+          productDetails: activeProducts.map((product) => ({
+            productId: product.productId,
+            lifecycle: product.lifecycle,
+            shipped: product.shipped,
+            verified: product.verified,
+            sold: product.sold,
+            soldToEmail: product.soldToEmail,
+            soldAt: product.soldAt,
+            buyerName: (() => {
+              const key = normalizeEmail(product.soldToEmail);
+              return key ? buyerMap.get(key) || null : null;
+            })(),
+            batchId: product.batchId,
+            boxId: box.boxId
+          })),
+          topProducts: activeProducts.slice(0, 5).map((product) => ({
+            productId: product.productId,
+            lifecycle: product.lifecycle,
+            soldToEmail: product.soldToEmail,
+            soldAt: product.soldAt
+          })),
+          estimatedRevenue,
+          estimatedProfit
+        };
+      })
+      .filter((box) => box.productCount > 0);
 
     const summary = shipmentPayload.reduce(
       (acc, item) => {
@@ -626,8 +634,13 @@ app.get("/api/db/user/purchases", authenticate, async (req, res) => {
       orderBy: { soldAt: "desc" },
       take: 20
     });
+    const onChainAvailability = await getOnChainAvailabilityMap(
+      purchases.map((product) => product.productId)
+    );
 
-    const payload = purchases.map((product) => ({
+    const payload = purchases
+      .filter((product) => onChainAvailability.get(product.productId))
+      .map((product) => ({
       productId: product.productId,
       soldAt: product.soldAt,
       retailerEmail: product.box?.retailer?.email || product.box?.retailerEmail || null,
@@ -637,7 +650,7 @@ app.get("/api/db/user/purchases", authenticate, async (req, res) => {
       boxId: product.box?.boxId || null,
       batchId: product.box?.batchId || null,
       shippingAddress: product.box?.shippingAddress || null
-    }));
+      }));
 
     return res.json({ purchases: payload });
   } catch (err) {
@@ -658,54 +671,84 @@ app.get("/api/admin/manufacturers", authenticate, requireAdmin, async (req, res)
       return res.json({ manufacturers: [] });
     }
 
-    const [totals, shipped, verified, sold, latestProductAt, boxCounts] = await Promise.all([
-      prisma.product.groupBy({
-        by: ["manufacturerId"],
-        _count: { _all: true }
+    const [products, boxes] = await Promise.all([
+      prisma.product.findMany({
+        select: {
+          manufacturerId: true,
+          productId: true,
+          boxId: true,
+          createdAt: true,
+          shipped: true,
+          verified: true,
+          sold: true
+        }
       }),
-      prisma.product.groupBy({
-        by: ["manufacturerId"],
-        where: { shipped: true },
-        _count: { _all: true }
-      }),
-      prisma.product.groupBy({
-        by: ["manufacturerId"],
-        where: { verified: true },
-        _count: { _all: true }
-      }),
-      prisma.product.groupBy({
-        by: ["manufacturerId"],
-        where: { sold: true },
-        _count: { _all: true }
-      }),
-      prisma.product.groupBy({
-        by: ["manufacturerId"],
-        _max: { createdAt: true }
-      }),
-      prisma.box.groupBy({
-        by: ["manufacturerId"],
-        _count: { _all: true }
+      prisma.box.findMany({
+        select: {
+          id: true,
+          manufacturerId: true
+        }
       })
     ]);
+    const onChainAvailability = await getOnChainAvailabilityMap(
+      products.map((product) => product.productId)
+    );
+    const activeProducts = products.filter((product) => onChainAvailability.get(product.productId));
+    const manufacturerMetrics = new Map();
 
-    const totalMap = new Map(totals.map((x) => [x.manufacturerId, x._count._all]));
-    const shippedMap = new Map(shipped.map((x) => [x.manufacturerId, x._count._all]));
-    const verifiedMap = new Map(verified.map((x) => [x.manufacturerId, x._count._all]));
-    const soldMap = new Map(sold.map((x) => [x.manufacturerId, x._count._all]));
-    const latestMap = new Map(latestProductAt.map((x) => [x.manufacturerId, x._max.createdAt]));
-    const boxMap = new Map(boxCounts.map((x) => [x.manufacturerId, x._count._all]));
+    activeProducts.forEach((product) => {
+      const current = manufacturerMetrics.get(product.manufacturerId) || {
+        totalProducts: 0,
+        shippedProducts: 0,
+        verifiedProducts: 0,
+        soldProducts: 0,
+        latestProductAt: null,
+        boxIds: new Set()
+      };
 
-    const payload = manufacturers.map((m) => ({
-      id: m.id,
-      email: m.email,
-      createdAt: m.createdAt,
-      totalBoxes: boxMap.get(m.id) || 0,
-      totalProducts: totalMap.get(m.id) || 0,
-      shippedProducts: shippedMap.get(m.id) || 0,
-      verifiedProducts: verifiedMap.get(m.id) || 0,
-      soldProducts: soldMap.get(m.id) || 0,
-      latestProductAt: latestMap.get(m.id) || null
-    }));
+      current.totalProducts += 1;
+      if (product.shipped) current.shippedProducts += 1;
+      if (product.verified) current.verifiedProducts += 1;
+      if (product.sold) current.soldProducts += 1;
+      if (!current.latestProductAt || new Date(product.createdAt) > new Date(current.latestProductAt)) {
+        current.latestProductAt = product.createdAt;
+      }
+      if (product.boxId) current.boxIds.add(product.boxId);
+
+      manufacturerMetrics.set(product.manufacturerId, current);
+    });
+
+    const activeBoxIds = new Set(activeProducts.map((product) => product.boxId).filter(Boolean));
+    boxes.forEach((box) => {
+      if (!activeBoxIds.has(box.id)) return;
+      const current = manufacturerMetrics.get(box.manufacturerId) || {
+        totalProducts: 0,
+        shippedProducts: 0,
+        verifiedProducts: 0,
+        soldProducts: 0,
+        latestProductAt: null,
+        boxIds: new Set()
+      };
+      current.boxIds.add(box.id);
+      manufacturerMetrics.set(box.manufacturerId, current);
+    });
+
+    const payload = manufacturers
+      .map((m) => {
+        const metrics = manufacturerMetrics.get(m.id);
+        return {
+          id: m.id,
+          email: m.email,
+          createdAt: m.createdAt,
+          totalBoxes: metrics ? metrics.boxIds.size : 0,
+          totalProducts: metrics?.totalProducts || 0,
+          shippedProducts: metrics?.shippedProducts || 0,
+          verifiedProducts: metrics?.verifiedProducts || 0,
+          soldProducts: metrics?.soldProducts || 0,
+          latestProductAt: metrics?.latestProductAt || null
+        };
+      })
+      .filter((manufacturer) => manufacturer.totalProducts > 0);
 
     return res.json({ manufacturers: payload });
   } catch (err) {
@@ -723,21 +766,41 @@ app.get("/api/admin/batches", authenticate, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: "manufacturerId must be a valid integer" });
     }
 
-    const groups = await prisma.product.groupBy({
-      by: ["manufacturerId", "batchId"],
+    const products = await prisma.product.findMany({
       where: manufacturerId ? { manufacturerId } : undefined,
-      _count: { _all: true },
-      _max: { createdAt: true },
-      orderBy: [{ _max: { createdAt: "desc" } }]
+      select: {
+        manufacturerId: true,
+        batchId: true,
+        productId: true,
+        createdAt: true
+      },
+      orderBy: [{ createdAt: "desc" }]
+    });
+    const onChainAvailability = await getOnChainAvailabilityMap(
+      products.map((product) => product.productId)
+    );
+    const activeProducts = products.filter((product) => onChainAvailability.get(product.productId));
+    const batchMap = new Map();
+
+    activeProducts.forEach((product) => {
+      const key = `${product.manufacturerId}::${product.batchId}`;
+      const current = batchMap.get(key) || {
+        manufacturerId: product.manufacturerId,
+        batchId: product.batchId,
+        productCount: 0,
+        latestProductAt: null
+      };
+      current.productCount += 1;
+      if (!current.latestProductAt || new Date(product.createdAt) > new Date(current.latestProductAt)) {
+        current.latestProductAt = product.createdAt;
+      }
+      batchMap.set(key, current);
     });
 
     return res.json({
-      batches: groups.map((g) => ({
-        manufacturerId: g.manufacturerId,
-        batchId: g.batchId,
-        productCount: g._count._all,
-        latestProductAt: g._max.createdAt
-      }))
+      batches: Array.from(batchMap.values()).sort(
+        (a, b) => new Date(b.latestProductAt || 0) - new Date(a.latestProductAt || 0)
+      )
     });
   } catch (err) {
     console.error("❌ Admin batches query failed:", err);
@@ -755,33 +818,51 @@ app.get("/api/admin/boxes", authenticate, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: "manufacturerId must be a valid integer" });
     }
 
-    const boxes = await prisma.box.findMany({
+    const [boxes, products] = await Promise.all([
+      prisma.box.findMany({
       where: {
         ...(manufacturerId ? { manufacturerId } : {}),
         ...(batchId ? { batchId } : {})
       },
       select: {
+        id: true,
         manufacturerId: true,
         boxId: true,
-        batchId: true,
-        _count: {
-          select: {
-            products: true
-          }
-        }
+        batchId: true
       },
       orderBy: [
         { createdAt: "desc" }
       ]
+      }),
+      prisma.product.findMany({
+        where: {
+          ...(manufacturerId ? { manufacturerId } : {}),
+          ...(batchId ? { batchId } : {})
+        },
+        select: {
+          productId: true,
+          boxId: true
+        }
+      })
+    ]);
+    const onChainAvailability = await getOnChainAvailabilityMap(
+      products.map((product) => product.productId)
+    );
+    const activeCountsByBoxId = new Map();
+    products.forEach((product) => {
+      if (!onChainAvailability.get(product.productId) || !product.boxId) return;
+      activeCountsByBoxId.set(product.boxId, (activeCountsByBoxId.get(product.boxId) || 0) + 1);
     });
 
     return res.json({
-      boxes: boxes.map((b) => ({
+      boxes: boxes
+        .map((b) => ({
         manufacturerId: b.manufacturerId,
         boxId: b.boxId,
         batchId: b.batchId,
-        productCount: b._count.products
+        productCount: activeCountsByBoxId.get(b.id) || 0
       }))
+        .filter((box) => box.productCount > 0)
     });
   } catch (err) {
     console.error("❌ Admin boxes query failed:", err);
@@ -829,32 +910,32 @@ app.get("/api/admin/products", authenticate, requireAdmin, async (req, res) => {
     };
     const orderBy = orderByMap[sortBy] || orderByMap.createdAt;
 
-    const [total, products] = await Promise.all([
-      prisma.product.count({ where }),
-      prisma.product.findMany({
-        where,
-        include: {
-          manufacturer: {
-            select: {
-              id: true,
-              email: true
-            }
-          },
-          box: {
-            select: {
-              id: true,
-              boxId: true,
-              shippingAddress: true
-            }
+    const products = await prisma.product.findMany({
+      where,
+      include: {
+        manufacturer: {
+          select: {
+            id: true,
+            email: true
           }
         },
-        orderBy,
-        skip: (page - 1) * pageSize,
-        take: pageSize
-      })
-    ]);
+        box: {
+          select: {
+            id: true,
+            boxId: true,
+            shippingAddress: true
+          }
+        }
+      },
+      orderBy
+    });
+    const onChainAvailability = await getOnChainAvailabilityMap(
+      products.map((product) => product.productId)
+    );
 
-    const productsWithDerivedLifecycle = products.map((p) => {
+    const productsWithDerivedLifecycle = products
+      .filter((product) => onChainAvailability.get(product.productId))
+      .map((p) => {
       let lifecycle = "CREATED";
       if (p.sold) lifecycle = "SOLD";
       else if (p.verified) lifecycle = "VERIFIED";
@@ -864,13 +945,15 @@ app.get("/api/admin/products", authenticate, requireAdmin, async (req, res) => {
         ...p,
         lifecycle
       };
-    });
+      });
+    const total = productsWithDerivedLifecycle.length;
+    const pagedProducts = productsWithDerivedLifecycle.slice((page - 1) * pageSize, page * pageSize);
 
     return res.json({
       page,
       pageSize,
       total,
-      products: productsWithDerivedLifecycle
+      products: pagedProducts
     });
   } catch (err) {
     console.error("❌ Admin products query failed:", err);
@@ -895,22 +978,21 @@ app.get("/api/db/dashboard/summary", authenticate, async (req, res) => {
       ...(batchId ? { batchId } : {})
     };
 
-    const [
-      totalProducts,
-      shippedProducts,
-      verifiedProducts,
-      soldProducts,
-      totalBoxes,
-      recentBoxes
-    ] = await Promise.all([
-      prisma.product.count({ where: productWhere }),
-      prisma.product.count({ where: { ...productWhere, shipped: true } }),
-      prisma.product.count({ where: { ...productWhere, verified: true } }),
-      prisma.product.count({ where: { ...productWhere, sold: true } }),
-      prisma.box.count({ where: boxWhere }),
+    const [products, recentBoxesRaw] = await Promise.all([
+      prisma.product.findMany({
+        where: productWhere,
+        select: {
+          productId: true,
+          boxId: true,
+          shipped: true,
+          verified: true,
+          sold: true
+        }
+      }),
       prisma.box.findMany({
         where: boxWhere,
         select: {
+          id: true,
           boxId: true,
           batchId: true,
           createdAt: true,
@@ -931,6 +1013,24 @@ app.get("/api/db/dashboard/summary", authenticate, async (req, res) => {
         take: 10
       })
     ]);
+    const onChainAvailability = await getOnChainAvailabilityMap(
+      products.map((product) => product.productId)
+    );
+    const activeProducts = products.filter((product) => onChainAvailability.get(product.productId));
+    const activeBoxIds = new Set(activeProducts.map((product) => product.boxId));
+    const recentBoxes = recentBoxesRaw
+      .filter((box) => activeBoxIds.has(box.id))
+      .map((box) => ({
+        ...box,
+        _count: {
+          products: activeProducts.filter((product) => product.boxId === box.id).length
+        }
+      }));
+    const totalProducts = activeProducts.length;
+    const shippedProducts = activeProducts.filter((product) => product.shipped).length;
+    const verifiedProducts = activeProducts.filter((product) => product.verified).length;
+    const soldProducts = activeProducts.filter((product) => product.sold).length;
+    const totalBoxes = activeBoxIds.size;
 
     return res.json({
       manufacturerId,
@@ -1305,6 +1405,30 @@ const contract = new ethers.Contract(
   abi,
   wallet
 );
+
+async function getOnChainAvailabilityMap(productIds) {
+  const uniqueIds = Array.from(
+    new Set(
+      (Array.isArray(productIds) ? productIds : [])
+        .map((productId) => String(productId || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  const availabilityEntries = await Promise.all(
+    uniqueIds.map(async (productId) => {
+      try {
+        const product = await contract.getProduct(productId);
+        const exists = Boolean(String(product?.productId || "").trim());
+        return [productId, exists];
+      } catch {
+        return [productId, false];
+      }
+    })
+  );
+
+  return new Map(availabilityEntries);
+}
 
 /* ================= CHALLENGE STORE ================= */
 

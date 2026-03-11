@@ -27,8 +27,6 @@ const defaultBatch = {
   image: "/mob.jpg"
 };
 
-const REG_HISTORY_KEY = "manufacturerRegisterHistory";
-
 const getStatusTone = (message) => {
   const text = String(message || "").toLowerCase();
   if (!text) return "info";
@@ -39,23 +37,6 @@ const getStatusTone = (message) => {
   return "info";
 };
 
-const readHistory = () => {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(REG_HISTORY_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const writeHistory = (items) => {
-  try {
-    localStorage.setItem(REG_HISTORY_KEY, JSON.stringify(items.slice(0, 12)));
-  } catch {
-    // Ignore persistence failures.
-  }
-};
-
 const ManufacturerDashboard = () => {
   const [batch, setBatch] = useState(defaultBatch);
   const [status, setStatus] = useState("");
@@ -63,8 +44,6 @@ const ManufacturerDashboard = () => {
   const [walletAddress, setWalletAddress] = useState("");
   const [activeAction, setActiveAction] = useState("register");
   const [batchCreated, setBatchCreated] = useState(false);
-  const [registerHistory, setRegisterHistory] = useState(readHistory);
-
   const [dashboardSummary, setDashboardSummary] = useState(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState("");
@@ -119,6 +98,10 @@ const ManufacturerDashboard = () => {
     loadDashboardSummary(selectedBatchId);
   }, [activeAction, selectedBatchId]);
 
+  useEffect(() => {
+    loadDashboardSummary("");
+  }, []);
+
   const summaryTotals = dashboardSummary?.summary || {};
   const totalProducts = summaryTotals.totalProducts || 0;
   const shippedProducts = summaryTotals.shippedProducts || 0;
@@ -143,10 +126,10 @@ const ManufacturerDashboard = () => {
     recentBoxes.length > 0 ? Math.max(...recentBoxes.map((box) => box._count?.products || 0), averageBoxSize || 1) : 1;
 
   const lastRegisteredText = useMemo(() => {
-    if (!registerHistory.length) return "";
-    const item = registerHistory[0];
-    return `${item.batchId} • ${item.boxId} • ${item.createdRange}`;
-  }, [registerHistory]);
+    if (!recentBoxes.length) return "";
+    const box = recentBoxes[0];
+    return `${box.batchId || "-"} • ${box.boxId} • ${box._count?.products || 0} product(s)`;
+  }, [recentBoxes]);
 
   const handleConnect = async () => {
     try {
@@ -179,18 +162,8 @@ const ManufacturerDashboard = () => {
     const start = parseInt(batch.startProductId.replace(/\D/g, ""), 10);
     const end = start + batch.batchSize - 1;
 
-    const entry = {
-      batchId: batch.batchId,
-      boxId: batch.boxId,
-      totalProducts: batch.batchSize,
-      createdRange: `P${start} → P${end}`,
-      createdAt: new Date().toISOString()
-    };
-    const nextHistory = [entry, ...registerHistory];
-    setRegisterHistory(nextHistory.slice(0, 12));
-    writeHistory(nextHistory);
-
     setStatus(`✅ Batch registered successfully.\nProducts created: P${start} → P${end}`);
+    loadDashboardSummary("");
   };
 
   const handleFetchBox = async () => {
@@ -481,14 +454,14 @@ const ManufacturerDashboard = () => {
               </div>
 
               <div className="manufacturer-history-card">
-                <h3>Previously Registered</h3>
-                {!registerHistory.length && <p>No registrations yet.</p>}
-                {registerHistory.map((item) => (
-                  <div className="manufacturer-history-item" key={`${item.batchId}-${item.boxId}-${item.createdAt}`}>
-                    <strong>{item.batchId}</strong>
-                    <span>Box: {item.boxId}</span>
-                    <span>Products: {item.totalProducts}</span>
-                    <span>{item.createdRange}</span>
+                <h3>Active Chain Inventory</h3>
+                {!recentBoxes.length && <p>No synced boxes found on the current deployment.</p>}
+                {recentBoxes.map((box) => (
+                  <div className="manufacturer-history-item" key={`${box.boxId}-${box.createdAt}`}>
+                    <strong>{box.batchId || "-"}</strong>
+                    <span>Box: {box.boxId}</span>
+                    <span>Products: {box._count?.products || 0}</span>
+                    <span>{formatDate(box.createdAt)}</span>
                   </div>
                 ))}
               </div>
